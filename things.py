@@ -300,7 +300,7 @@ class Things:
     def rotation_and_movement(self, neural_action):
         self.Rotation += torch.where(
             neural_action[:, 1] < 0,
-            torch.atan(neural_action[:, 0]),
+            neural_action[:, 0],
             torch.tensor([0.])
         )
         self.U = torch.stack(
