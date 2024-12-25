@@ -233,10 +233,10 @@ class Things:
 
         perpendicular = torch.stack(
             (
-                -unit_vectors[:, 1],
-                unit_vectors[:, 0]
+                -unit_vectors[..., 1],
+                unit_vectors[..., 0]
             ),
-            dim = 1
+            dim = 2
         )
 
         # Calculate resource manipulations
