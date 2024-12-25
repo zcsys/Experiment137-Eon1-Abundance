@@ -215,35 +215,21 @@ class Things:
         ).repeat(2, 1, 1, 1).squeeze(1)
         indices = (self.positions[self.structure_mask] // grid.cell_size).long()
 
-        numerator = torch.gather(
-            self.diffs[self.monad_mask][:, self.structure_mask],
-            1,
-            expanded_indices
-        )
-
-        denominator = (
-            torch.gather(
-                self.distances[self.monad_mask][:, self.structure_mask],
-                1,
-                self.structure_indices
-            ) + epsilon
-        ).unsqueeze(2)
-
-        unit_vectos = numerator / denominator
-
-        perpendicular = torch.stack(
-            (
-                -unit_vectors[:, 1],
-                unit_vectors[:, 0]
-            ),
-            dim = 1
-        )
-
         # Calculate resource manipulations
         manipulation_contributions = (
-            neural_action[:, 6:12].unsqueeze(2) *
-            unit_vectos /
-            denominator
+            (
+                torch.gather(
+                    self.diffs[self.monad_mask][:, self.structure_mask],
+                    1,
+                    expanded_indices
+                ) / (
+                    torch.gather(
+                        self.distances[self.monad_mask][:, self.structure_mask],
+                        1,
+                        self.structure_indices
+                    ) ** 2 + epsilon
+                ).unsqueeze(2)
+            ) * neural_action[:, 6:12].unsqueeze(2)
         ) * 8.
 
         self.str_manipulations.scatter_add_(
@@ -262,16 +248,24 @@ class Things:
 
         # Calculate movements
         movement_contributions = (
-            neural_action[:, 0:6].unsqueeze(2) *
-            unit_vectos /
-            denominator
-        ) * 8.
-
-        # Reduce energies
-        self.energies -= (
+            torch.gather(
+                self.diffs[self.monad_mask][:, self.structure_mask],
+                1,
+                expanded_indices
+            ) / (
+                torch.gather(
+                    self.distances[self.monad_mask][:, self.structure_mask],
+                    1,
+                    self.structure_indices
+                ) ** 2 + epsilon
+            ).unsqueeze(2)
+        ) * neural_action[:, 0:6].unsqueeze(2) * 8. # This scaling is because
+                                                    # the minimum possible
+        # Reduce energies                           # distance between a monad
+        self.energies -= (                          # and a structural unit is 8
             movement_contributions.norm(dim = 2)
-        ).sum(dim = 1) / 6
-
+        ).sum(dim = 1) / 6 # This scaling is because a monad can interact with
+                           # 6 different structural units
         # Return movements
         return movement_tensor.scatter_add(
             0,
