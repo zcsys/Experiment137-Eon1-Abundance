@@ -105,6 +105,8 @@
 		* Structural unit reaction manipulation: 6 x 2 neurons [-1, 1]
 	* Memory - 6 tanh(float32)
 	* Neural net - nn2 with 202 hidden neurons (13263 parameters)
+* Monad1X275: Monad1X257 + ability to affect the perpendicular movements of
+							structural units (14231 parameters)
 
 
 

@@ -59,7 +59,7 @@ class Things:
         self.genomes = torch.cat(
             (
                 torch.zeros((self.Pop, 6), dtype = torch.float32),
-                initialize_parameters(self.Pop, 40, 21, "nn2")
+                initialize_parameters(self.Pop, 40, 27, "nn2")
             ),
             dim = 1
         )
@@ -77,9 +77,9 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1X257 neurogenetics"""
+        """Monad1X275 neurogenetics"""
         self.elemental_biases = torch.tanh(self.genomes[:, :6])
-        self.nn = nn2(self.genomes[:, 6:], 40, 21)
+        self.nn = nn2(self.genomes[:, 6:], 40, 27)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
         original_genome = self.genomes[i].clone()
@@ -229,7 +229,7 @@ class Things:
             ) + epsilon
         ).unsqueeze(2)
 
-        unit_vectos = numerator / denominator
+        unit_vectors = numerator / denominator
 
         perpendicular = torch.stack(
             (
@@ -241,8 +241,8 @@ class Things:
 
         # Calculate resource manipulations
         manipulation_contributions = (
-            neural_action[:, 6:12].unsqueeze(2) *
-            unit_vectos /
+            neural_action[:, 12:18].unsqueeze(2) *
+            unit_vectors /
             denominator
         ) * 8.
 
@@ -262,9 +262,12 @@ class Things:
 
         # Calculate movements
         movement_contributions = (
-            neural_action[:, 0:6].unsqueeze(2) *
-            unit_vectos /
-            denominator
+            (
+                neural_action[:, 0:6].unsqueeze(2) *
+                unit_vectors +
+                neural_action[:, 6:12].unsqueeze(2) *
+                perpendicular
+            ) / denominator
         ) * 8.
 
         # Reduce energies
@@ -338,7 +341,7 @@ class Things:
             self.movement_tensor[self.monad_mask] = self.rotation_and_movement(
                 neural_action[:, :2]
             )
-            self.memory = neural_action[:, 15:21]
+            self.memory = neural_action[:, 21:27]
 
         # Fetch energyUnit movements
         if self.energy_mask.any():
@@ -349,7 +352,7 @@ class Things:
             if self.Pop > 0:
                 self.movement_tensor[self.structure_mask] = self.re_action(
                     grid,
-                    neural_action[:, 3:15]
+                    neural_action[:, 3:21]
                 )
             else:
                 self.movement_tensor[self.structure_mask] = torch.zeros(
