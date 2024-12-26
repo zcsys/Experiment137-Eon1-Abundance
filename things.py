@@ -19,10 +19,14 @@ class Things:
             self.load_state(state_file)
             return
 
+        # Place memory units
+        # self.place_memoryUnits()
+
         # Main attributes
         self.thing_types = thing_types
         self.sizes = torch.tensor([THING_TYPES[x]["size"] for x in thing_types])
         self.positions = add_positions(len(thing_types))
+        self.colors = [THING_TYPES[x]["color"] for x in thing_types]
 
         # Initialize tensor masks
         self.monad_mask = torch.tensor(
@@ -34,6 +38,9 @@ class Things:
         self.structure_mask = torch.tensor(
             [thing_type == "structuralUnit" for thing_type in self.thing_types]
         )
+        self.memory_mask = torch.tensor(
+            [thing_type == "memoryUnit" for thing_type in self.thing_types]
+        )
 
         # Initialize state vars
         self.N = len(self.thing_types)
@@ -43,7 +50,6 @@ class Things:
             for _ in range(self.Pop)]
         )
         self.E = self.energies.sum().item() // 1000
-        self.colors = [THING_TYPES[x]["color"] for x in self.thing_types]
         self.memory = torch.zeros((self.Pop, 6), dtype = torch.float32)
         self.str_manipulations = torch.zeros((0, 2), dtype = torch.float32)
         self.Rotation = torch.rand((self.Pop,)) * 2 * math.pi
@@ -580,6 +586,13 @@ class Things:
             ),
             dim = 0
         )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.tensor([False])
+            ),
+            dim = 0
+        )
         self.N += 1
         self.Pop += 1
 
@@ -630,6 +643,7 @@ class Things:
             self.monad_mask = remove_element(self.monad_mask, idx)
             self.energy_mask = remove_element(self.energy_mask, idx)
             self.structure_mask = remove_element(self.structure_mask, idx)
+            self.memory_mask = remove_element(self.memory_mask, idx)
 
         # Update collective state vars
         self.N -= len(indices)
@@ -669,6 +683,13 @@ class Things:
         self.structure_mask = torch.cat(
             (
                 self.structure_mask,
+                torch.zeros(N, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
                 torch.zeros(N, dtype = torch.bool)
             ),
             dim = 0
@@ -740,6 +761,13 @@ class Things:
             ),
             dim = 0
         )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.zeros(N, dtype = torch.bool)
+            ),
+            dim = 0
+        )
 
     def remove_energyUnits(self, indices):
         for i in indices[::-1]:
@@ -755,6 +783,7 @@ class Things:
         self.monad_mask = self.monad_mask[mask]
         self.energy_mask = self.energy_mask[mask]
         self.structure_mask = self.structure_mask[mask]
+        sels.memory_mask = self.memory_mask[mask]
 
     def draw(self, screen, show_info = True, show_sight = False):
         for i, pos in enumerate(self.positions):
@@ -842,6 +871,9 @@ class Things:
         self.structure_mask = torch.tensor(
             [thing_type == "structuralUnit" for thing_type in self.thing_types]
         )
+        self.memory_mask = torch.tensor(
+            [thing_type == "memoryUnit" for thing_type in self.thing_types]
+        )
         self.Pop = self.monad_mask.sum().item()
         self.E = self.energies.sum().item() // 1000
 
@@ -887,10 +919,62 @@ class Things:
             ),
             dim = 0
         )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.zeros(POP_STR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
         self.str_manipulations = torch.cat(
             (
                 self.str_manipulations,
                 torch.rand((POP_STR, 2), dtype = torch.float32) * 20 - 10
+            ),
+            dim = 0
+        )
+
+    def place_memoryUnits(self, POP_MMR = 1):
+        self.thing_types += ["memoryUnit" for _ in range(POP_STR)]
+        self.sizes = torch.cat(
+            (
+                self.sizes,
+                torch.tensor(
+                    [THING_TYPES["memoryUnit"]["size"]
+                     for _ in range(POP_MMR)]
+                )
+            ),
+            dim = 0
+        )
+        self.positions = add_positions(POP_MMR, self.positions)
+        self.colors += [THING_TYPES["memoryUnit"]["color"]
+                        for _ in range(POP_MMR)]
+        self.N += POP_MMR
+        self.monad_mask = torch.cat(
+            (
+                self.monad_mask,
+                torch.zeros(POP_MMR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.energy_mask = torch.cat(
+            (
+                self.energy_mask,
+                torch.zeros(POP_MMR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.structure_mask = torch.cat(
+            (
+                self.structure_mask,
+                torch.zeros(POP_MMR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.ones(POP_MMR, dtype = torch.bool)
             ),
             dim = 0
         )

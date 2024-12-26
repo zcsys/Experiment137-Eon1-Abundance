@@ -61,9 +61,9 @@ THING_TYPES = {
         "color": colors["R"],
         "size": 3
     },
-    "message": {
+    "memoryUnit": {
         "color": colors["B"],
-        "size": 2
+        "size": 10
     }
 }
 
