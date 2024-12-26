@@ -279,8 +279,8 @@ class Things:
         # Reduce energies
         self.energies -= (
             movement_contributions.norm(dim = 2)
-        ).sum(dim = 1) / 6
-
+        ).sum(dim = 1) / 6 # This scaling is because a monad can interact with
+                           # 6 different structural units
         # Return movements
         return movement_tensor.scatter_add(
             0,
