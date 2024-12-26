@@ -19,10 +19,14 @@ class Things:
             self.load_state(state_file)
             return
 
+        # Place memory units
+        # self.place_memoryUnits()
+
         # Main attributes
         self.thing_types = thing_types
         self.sizes = torch.tensor([THING_TYPES[x]["size"] for x in thing_types])
         self.positions = add_positions(len(thing_types))
+        self.colors = [THING_TYPES[x]["color"] for x in thing_types]
 
         # Initialize tensor masks
         self.monad_mask = torch.tensor(
@@ -34,6 +38,9 @@ class Things:
         self.structure_mask = torch.tensor(
             [thing_type == "structuralUnit" for thing_type in self.thing_types]
         )
+        self.memory_mask = torch.tensor(
+            [thing_type == "memoryUnit" for thing_type in self.thing_types]
+        )
 
         # Initialize state vars
         self.N = len(self.thing_types)
@@ -43,7 +50,6 @@ class Things:
             for _ in range(self.Pop)]
         )
         self.E = self.energies.sum().item() // 1000
-        self.colors = [THING_TYPES[x]["color"] for x in self.thing_types]
         self.memory = torch.zeros((self.Pop, 6), dtype = torch.float32)
         self.str_manipulations = torch.zeros((0, 2), dtype = torch.float32)
         self.Rotation = torch.rand((self.Pop,)) * 2 * math.pi
@@ -59,7 +65,7 @@ class Things:
         self.genomes = torch.cat(
             (
                 torch.zeros((self.Pop, 6), dtype = torch.float32),
-                initialize_parameters(self.Pop, 40, 21, "nn2")
+                initialize_parameters(self.Pop, 40, 27, "nn2")
             ),
             dim = 1
         )
@@ -77,9 +83,9 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1X257 neurogenetics"""
+        """Monad1X275 neurogenetics"""
         self.elemental_biases = torch.tanh(self.genomes[:, :6])
-        self.nn = nn2(self.genomes[:, 6:], 40, 21)
+        self.nn = nn2(self.genomes[:, 6:], 40, 27)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
         original_genome = self.genomes[i].clone()
@@ -215,21 +221,35 @@ class Things:
         ).repeat(2, 1, 1, 1).squeeze(1)
         indices = (self.positions[self.structure_mask] // grid.cell_size).long()
 
+        numerator = torch.gather(
+            self.diffs[self.monad_mask][:, self.structure_mask],
+            1,
+            expanded_indices
+        )
+
+        denominator = (
+            torch.gather(
+                self.distances[self.monad_mask][:, self.structure_mask],
+                1,
+                self.structure_indices
+            ) + epsilon
+        ).unsqueeze(2)
+
+        unit_vectors = numerator / denominator
+
+        perpendicular = torch.stack(
+            (
+                -unit_vectors[..., 1],
+                unit_vectors[..., 0]
+            ),
+            dim = 2
+        )
+
         # Calculate resource manipulations
         manipulation_contributions = (
-            (
-                torch.gather(
-                    self.diffs[self.monad_mask][:, self.structure_mask],
-                    1,
-                    expanded_indices
-                ) / (
-                    torch.gather(
-                        self.distances[self.monad_mask][:, self.structure_mask],
-                        1,
-                        self.structure_indices
-                    ) ** 2 + epsilon
-                ).unsqueeze(2)
-            ) * neural_action[:, 6:12].unsqueeze(2)
+            neural_action[:, 12:18].unsqueeze(2) *
+            unit_vectors /
+            denominator
         ) * 8.
 
         self.str_manipulations.scatter_add_(
@@ -248,21 +268,16 @@ class Things:
 
         # Calculate movements
         movement_contributions = (
-            torch.gather(
-                self.diffs[self.monad_mask][:, self.structure_mask],
-                1,
-                expanded_indices
-            ) / (
-                torch.gather(
-                    self.distances[self.monad_mask][:, self.structure_mask],
-                    1,
-                    self.structure_indices
-                ) ** 2 + epsilon
-            ).unsqueeze(2)
-        ) * neural_action[:, 0:6].unsqueeze(2) * 8. # This scaling is because
-                                                    # the minimum possible
-        # Reduce energies                           # distance between a monad
-        self.energies -= (                          # and a structural unit is 8
+            (
+                neural_action[:, 0:6].unsqueeze(2) *
+                unit_vectors +
+                neural_action[:, 6:12].unsqueeze(2) *
+                perpendicular
+            ) / denominator
+        ) * 8.
+
+        # Reduce energies
+        self.energies -= (
             movement_contributions.norm(dim = 2)
         ).sum(dim = 1) / 6 # This scaling is because a monad can interact with
                            # 6 different structural units
@@ -332,7 +347,7 @@ class Things:
             self.movement_tensor[self.monad_mask] = self.rotation_and_movement(
                 neural_action[:, :2]
             )
-            self.memory = neural_action[:, 15:21]
+            self.memory = neural_action[:, 21:27]
 
         # Fetch energyUnit movements
         if self.energy_mask.any():
@@ -343,7 +358,7 @@ class Things:
             if self.Pop > 0:
                 self.movement_tensor[self.structure_mask] = self.re_action(
                     grid,
-                    neural_action[:, 3:15]
+                    neural_action[:, 3:21]
                 )
             else:
                 self.movement_tensor[self.structure_mask] = torch.zeros(
@@ -571,6 +586,13 @@ class Things:
             ),
             dim = 0
         )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.tensor([False])
+            ),
+            dim = 0
+        )
         self.N += 1
         self.Pop += 1
 
@@ -621,6 +643,7 @@ class Things:
             self.monad_mask = remove_element(self.monad_mask, idx)
             self.energy_mask = remove_element(self.energy_mask, idx)
             self.structure_mask = remove_element(self.structure_mask, idx)
+            self.memory_mask = remove_element(self.memory_mask, idx)
 
         # Update collective state vars
         self.N -= len(indices)
@@ -660,6 +683,13 @@ class Things:
         self.structure_mask = torch.cat(
             (
                 self.structure_mask,
+                torch.zeros(N, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
                 torch.zeros(N, dtype = torch.bool)
             ),
             dim = 0
@@ -731,6 +761,13 @@ class Things:
             ),
             dim = 0
         )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.zeros(N, dtype = torch.bool)
+            ),
+            dim = 0
+        )
 
     def remove_energyUnits(self, indices):
         for i in indices[::-1]:
@@ -746,6 +783,7 @@ class Things:
         self.monad_mask = self.monad_mask[mask]
         self.energy_mask = self.energy_mask[mask]
         self.structure_mask = self.structure_mask[mask]
+        sels.memory_mask = self.memory_mask[mask]
 
     def draw(self, screen, show_info = True, show_sight = False):
         for i, pos in enumerate(self.positions):
@@ -833,6 +871,9 @@ class Things:
         self.structure_mask = torch.tensor(
             [thing_type == "structuralUnit" for thing_type in self.thing_types]
         )
+        self.memory_mask = torch.tensor(
+            [thing_type == "memoryUnit" for thing_type in self.thing_types]
+        )
         self.Pop = self.monad_mask.sum().item()
         self.E = self.energies.sum().item() // 1000
 
@@ -878,10 +919,62 @@ class Things:
             ),
             dim = 0
         )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.zeros(POP_STR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
         self.str_manipulations = torch.cat(
             (
                 self.str_manipulations,
                 torch.rand((POP_STR, 2), dtype = torch.float32) * 20 - 10
+            ),
+            dim = 0
+        )
+
+    def place_memoryUnits(self, POP_MMR = 1):
+        self.thing_types += ["memoryUnit" for _ in range(POP_STR)]
+        self.sizes = torch.cat(
+            (
+                self.sizes,
+                torch.tensor(
+                    [THING_TYPES["memoryUnit"]["size"]
+                     for _ in range(POP_MMR)]
+                )
+            ),
+            dim = 0
+        )
+        self.positions = add_positions(POP_MMR, self.positions)
+        self.colors += [THING_TYPES["memoryUnit"]["color"]
+                        for _ in range(POP_MMR)]
+        self.N += POP_MMR
+        self.monad_mask = torch.cat(
+            (
+                self.monad_mask,
+                torch.zeros(POP_MMR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.energy_mask = torch.cat(
+            (
+                self.energy_mask,
+                torch.zeros(POP_MMR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.structure_mask = torch.cat(
+            (
+                self.structure_mask,
+                torch.zeros(POP_MMR, dtype = torch.bool)
+            ),
+            dim = 0
+        )
+        self.memory_mask = torch.cat(
+            (
+                self.memory_mask,
+                torch.ones(POP_MMR, dtype = torch.bool)
             ),
             dim = 0
         )
