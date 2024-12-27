@@ -211,8 +211,6 @@ class Things:
     def re_action(self, grid, neural_action):
         # Helper variables
         numberOf_structuralUnits = self.structure_mask.sum()
-        movement_tensor = torch.zeros((numberOf_structuralUnits, 2),
-                                      dtype = torch.float32)
         expanded_indices = self.structure_indices.unsqueeze(2).expand(-1, -1, 2)
 
         # Initialize force field
@@ -279,8 +277,18 @@ class Things:
         # Reduce energies
         self.energies -= (
             movement_contributions.norm(dim = 2)
-        ).sum(dim = 1) / 6 # This scaling is because a monad can interact with
-                           # 6 different structural units
+        ).sum(dim = 1) / 6
+
+        # Initialize movement tensor with repulsive force
+        movement_tensor = (
+            -self.diffs[self.structure_mask][:, self.structure_mask] /
+            (
+                self.distances[self.structure_mask][
+                    :, self.structure_mask
+                ] ** 2 + epsilon
+            ).unsqueeze(2)
+        ).sum(dim = 1)
+
         # Return movements
         return movement_tensor.scatter_add(
             0,
@@ -783,7 +791,7 @@ class Things:
         self.monad_mask = self.monad_mask[mask]
         self.energy_mask = self.energy_mask[mask]
         self.structure_mask = self.structure_mask[mask]
-        sels.memory_mask = self.memory_mask[mask]
+        self.memory_mask = self.memory_mask[mask]
 
     def draw(self, screen, show_info = True, show_sight = False):
         for i, pos in enumerate(self.positions):
