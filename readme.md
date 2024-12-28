@@ -107,6 +107,10 @@
 	* Neural net - nn2 with 202 hidden neurons (13263 parameters)
 * Monad1X275: Monad1X257 + ability to affect the perpendicular movements of
 							structural units (16745 parameters)
+* Monad1XA421: Same as Monad1X275, except using nn03 instead of nn2 (37753
+							 parameters)
+* Monad1XB421: Same as Monad1X275, except using nn13 instead of nn2 (67193
+							 parameters)
 
 
 

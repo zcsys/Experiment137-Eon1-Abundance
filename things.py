@@ -65,7 +65,7 @@ class Things:
         self.genomes = torch.cat(
             (
                 torch.zeros((self.Pop, 6), dtype = torch.float32),
-                initialize_parameters(self.Pop, 40, 27, "nn2")
+                initialize_parameters(self.Pop, 40, 27, "nn13")
             ),
             dim = 1
         )
@@ -83,9 +83,9 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1X275 neurogenetics"""
+        """Monad1XB421 neurogenetics"""
         self.elemental_biases = torch.tanh(self.genomes[:, :6])
-        self.nn = nn2(self.genomes[:, 6:], 40, 27)
+        self.nn = nn13(self.genomes[:, 6:], 40, 27)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
         original_genome = self.genomes[i].clone()
