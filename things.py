@@ -88,10 +88,9 @@ class Things:
         self.nn = nn13(self.genomes[:, 6:], 40, 27)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
-        original_genome = self.genomes[i].clone()
-        mutation_mask = torch.rand_like(original_genome) < probability
-        mutations = torch.rand_like(original_genome) * 2 - 1
-        return original_genome + mutation_mask * mutations * strength
+        mutation_mask = torch.rand_like(self.genomes[i]) < probability
+        mutations = torch.rand_like(self.genomes[i]) * 2 - 1
+        return self.genomes[i] + mutation_mask * mutations * strength
 
     def sensory_inputs(self, grid):
         # For each monad, there's a vector pointing towards the center of the
