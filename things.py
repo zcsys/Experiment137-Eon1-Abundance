@@ -51,7 +51,7 @@ class Things:
         )
         self.E = self.energies.sum().item() // 1000
         self.memory = torch.zeros((self.Pop, 6), dtype = torch.float32)
-        self.str_manipulations = torch.zeros((0, 2), dtype = torch.float32)
+        self.str_manipulations = torch.zeros((0, 2, 3), dtype = torch.float32)
         self.Rotation = torch.rand((self.Pop,)) * 2 * math.pi
         self.U = torch.stack(
             (
@@ -65,7 +65,7 @@ class Things:
         self.genomes = torch.cat(
             (
                 torch.zeros((self.Pop, 6), dtype = torch.float32),
-                initialize_parameters(self.Pop, 40, 27, "nn13")
+                initialize_parameters(self.Pop, 40, 39, "nn03")
             ),
             dim = 1
         )
@@ -83,9 +83,9 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1XB421 neurogenetics"""
+        """Monad1XA433 neurogenetics"""
         self.elemental_biases = torch.tanh(self.genomes[:, :6])
-        self.nn = nn13(self.genomes[:, 6:], 40, 27)
+        self.nn = nn03(self.genomes[:, 6:], 40, 39)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
         mutation_mask = torch.rand_like(self.genomes[i]) < probability
@@ -215,7 +215,7 @@ class Things:
         # Initialize force field
         force_field = torch.zeros_like(
             grid.grid
-        ).repeat(2, 1, 1, 1).squeeze(1)
+        ).repeat(2, 1, 1, 1)
         indices = (self.positions[self.structure_mask] // grid.cell_size).long()
 
         numerator = torch.gather(
@@ -244,22 +244,25 @@ class Things:
 
         # Calculate resource manipulations
         manipulation_contributions = (
-            neural_action[:, 12:18].unsqueeze(2) *
-            unit_vectors /
-            denominator
+            neural_action[:, 12:30].view(-1, 6, 1, 3) *
+            (
+                unit_vectors /
+                denominator
+            ).unsqueeze(3)
         ) * 8.
 
         self.str_manipulations.scatter_add_(
             0,
-            expanded_indices.view(-1, 2),
-            manipulation_contributions.view(-1, 2)
+            expanded_indices.repeat(1, 1, 3).view(-1, 2, 3),
+            manipulation_contributions.view(-1, 2, 3)
         ).clamp_(-10, 10)
 
         # Calculate and apply force field with diffusion
         for i in range(2): # For vertical and horizontal axes
-            force_field[i, 1][ # Green channel
-                indices[:, 1], indices[:, 0]
-            ] += self.str_manipulations[:, i]
+            for j in range(3): # For each channel
+                force_field[i, j][
+                    indices[:, 1], indices[:, 0]
+                ] += self.str_manipulations[:, i, j]
 
         grid.diffuse(force_field)
 
@@ -354,7 +357,7 @@ class Things:
             self.movement_tensor[self.monad_mask] = self.rotation_and_movement(
                 neural_action[:, :2]
             )
-            self.memory = neural_action[:, 21:27]
+            self.memory = neural_action[:, 33:39]
 
         # Fetch energyUnit movements
         if self.energy_mask.any():
@@ -365,16 +368,13 @@ class Things:
             if self.Pop > 0:
                 self.movement_tensor[self.structure_mask] = self.re_action(
                     grid,
-                    neural_action[:, 3:21]
+                    neural_action[:, 3:33]
                 )
             else:
                 self.movement_tensor[self.structure_mask] = torch.zeros(
                     (self.structure_mask.sum(), 2),
                     dtype = torch.float32
                 )
-
-        # Monads and energy units to leave trace
-        self.trace(grid)
 
         # Self-induced divison
         if self.monad_mask.any():
@@ -936,7 +936,7 @@ class Things:
         self.str_manipulations = torch.cat(
             (
                 self.str_manipulations,
-                torch.rand((POP_STR, 2), dtype = torch.float32) * 20 - 10
+                torch.rand((POP_STR, 2, 3), dtype = torch.float32) * 20 - 10
             ),
             dim = 0
         )
