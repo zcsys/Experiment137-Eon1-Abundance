@@ -298,30 +298,6 @@ class Things:
             movement_contributions.view(-1, 2)
         ) * 5.
 
-    def trace(self, grid):
-        # Initialize force field
-        force_field = torch.zeros_like(
-            grid.grid
-        ).repeat(2, 1, 1, 1).squeeze(1)
-
-        # Monads to leave red traces
-        indices = (self.positions[self.monad_mask] // grid.cell_size).long()
-        for i in range(2):
-            force_field[i, 0][
-                indices[:, 1], indices[:, 0]
-            ] += torch.rand((self.Pop,), dtype = torch.float32) * 200 - 100
-
-        # Energy units to leave blue traces
-        indices = (self.positions[self.energy_mask] // grid.cell_size).long()
-        for i in range(2):
-            force_field[i, 2][
-                indices[:, 1], indices[:, 0]
-            ] += torch.rand((self.energy_mask.sum(),),
-                            dtype = torch.float32) * 200 - 100
-
-        # Apply the field
-        grid.apply_forces(force_field)
-
     def rotation_and_movement(self, neural_action):
         self.Rotation += torch.where(
             neural_action[:, 1] < 0,
