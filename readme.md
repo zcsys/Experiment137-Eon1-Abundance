@@ -112,6 +112,11 @@
 * Monad1XB421: Same as Monad1X275, except using nn13 instead of nn2 (67193
 							 parameters)
 
+#### Era 3: Nanobiota
+* nn23: Simple feed-forward network with 3 hidden layers (the first 2 with ReLU
+				and the 3rd with leaky RelU) of 8x, 4x, and 2x the input size, finally
+				transformed into the output layer with tanh
+
 
 
 --\
