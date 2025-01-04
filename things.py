@@ -50,7 +50,7 @@ class Things:
             for _ in range(self.Pop)]
         )
         self.E = self.energies.sum().item() // 1000
-        self.memory = torch.zeros((self.Pop, 6), dtype = torch.float32)
+        self.memory = torch.zeros((self.Pop, 12), dtype = torch.float32)
         self.str_manipulations = torch.zeros((0, 2, 3), dtype = torch.float32)
         self.Rotation = torch.rand((self.Pop,)) * 2 * math.pi
         self.U = torch.stack(
@@ -64,8 +64,8 @@ class Things:
         # Initialize genomes and lineages
         self.genomes = torch.cat(
             (
-                torch.zeros((self.Pop, 6), dtype = torch.float32),
-                initialize_parameters(self.Pop, 40, 39, "nn03")
+                torch.zeros((self.Pop, 12), dtype = torch.float32),
+                initialize_parameters(self.Pop, 52, 45, "nn23")
             ),
             dim = 1
         )
@@ -83,9 +83,9 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1XA433 neurogenetics"""
-        self.elemental_biases = torch.tanh(self.genomes[:, :6])
-        self.nn = nn03(self.genomes[:, 6:], 40, 39)
+        """Monad1XC813 neurogenetics"""
+        self.elemental_biases = torch.tanh(self.genomes[:, :12])
+        self.nn = nn23(self.genomes[:, 12:], 52, 45)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
         mutation_mask = torch.rand_like(self.genomes[i]) < probability
@@ -187,7 +187,7 @@ class Things:
                 self.memory
             ),
             dim = 1
-        ).view(self.Pop, 40, 1)
+        ).view(self.Pop, 52, 1)
 
     def neural_action(self):
         return self.nn.forward(self.input_vectors)
@@ -300,7 +300,7 @@ class Things:
 
     def rotation_and_movement(self, neural_action):
         self.Rotation += torch.where(
-            neural_action[:, 1] < 0,
+            neural_action[:, 1] <= 0,
             neural_action[:, 0],
             torch.tensor([0.])
         )
@@ -327,13 +327,13 @@ class Things:
                 dtype = torch.float32
             )
 
-        # Monad movements & internal state
+        # Monad movements & memory
         if self.monad_mask.any():
             neural_action = self.neural_action()
             self.movement_tensor[self.monad_mask] = self.rotation_and_movement(
                 neural_action[:, :2]
             )
-            self.memory = neural_action[:, 33:39]
+            self.memory = neural_action[:, 33:45]
 
         # Fetch energyUnit movements
         if self.energy_mask.any():
@@ -516,7 +516,7 @@ class Things:
         self.memory = torch.cat(
             (
                 self.memory,
-                torch.zeros((1, 6), dtype = torch.float32)
+                torch.zeros((1, 12), dtype = torch.float32)
             ),
             dim = 0
         )

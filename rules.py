@@ -15,7 +15,7 @@ def Rules(simul, n):
         if simul.period > 0 or simul.epoch > 0:
             simul.things.energies -= METABOLIC_ACTIVITY
         else:
-            simul.things.energies[50:] -= METABOLIC_ACTIVITY
+            simul.things.energies[40:] -= METABOLIC_ACTIVITY
         to_remove = torch.nonzero(simul.things.energies <= 0)
         if len(to_remove) > 0:
             simul.things.perish_monad(to_remove.squeeze(1).tolist())
@@ -31,12 +31,12 @@ def Rules(simul, n):
             elif 200 < simul.things.E:
                 METABOLIC_ACTIVITY = 1. + 0.09 * (simul.things.E - 200)
         else:
-            if simul.things.E <= 500:
+            if simul.things.E <= 400:
                 METABOLIC_ACTIVITY = 0.1
-            elif 500 < simul.things.E <= 600:
-                METABOLIC_ACTIVITY = 0.1 + 0.009 * (simul.things.E - 500)
-            elif 600 < simul.things.E:
-                METABOLIC_ACTIVITY = 1. + 0.09 * (simul.things.E - 600)
+            elif 400 < simul.things.E <= 500:
+                METABOLIC_ACTIVITY = 0.1 + 0.009 * (simul.things.E - 400)
+            elif 500 < simul.things.E:
+                METABOLIC_ACTIVITY = 1. + 0.09 * (simul.things.E - 500)
 
     # Resource management
     if 2 in n:
