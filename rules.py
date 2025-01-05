@@ -47,50 +47,49 @@ def Rules(simul, n):
     if 3 in n:
         # Get structural unit indices and distances
         struct_mask = simul.things.structure_mask
-        if not struct_mask.any():
-            return
+        if struct_mask.any():
+            # Recompute distances for current configuration
+            _, distances, _ = vicinity(simul.things.positions)
+            str_indices = torch.nonzero(struct_mask).squeeze(1)
+            struct_distances = distances[struct_mask][:, struct_mask]
 
-        # Recompute distances for current configuration
-        _, distances, _ = vicinity(simul.things.positions)
-        struct_indices = torch.nonzero(struct_mask).squeeze(1)
-        struct_distances = distances[struct_mask][:, struct_mask]
+            # Create probability matrices for bond formation and breaking
+            form_prob_matrix = torch.rand_like(struct_distances)
+            break_prob_matrix = torch.rand_like(struct_distances)
 
-        # Create probability matrices for bond formation and breaking
-        form_prob_matrix = torch.rand_like(struct_distances)
-        break_prob_matrix = torch.rand_like(struct_distances)
+            # Find pairs for bond formation that meet criteria:
+            # 1. Within distance range (10-50 as defined in Bonds class)
+            # 2. Meet probability threshold
+            # 3. Not the same unit (diagonal)
+            valid_pairs = torch.nonzero(
+                (struct_distances >= 10) &  # min_dist
+                (struct_distances <= 50) &  # max_dist
+                (form_prob_matrix < 0.0001) &  # probability threshold
+                (struct_distances > 0)  # exclude self-bonds
+            )
 
-        # Find pairs for bond formation that meet criteria:
-        # 1. Within distance range (10-50 as defined in Bonds class)
-        # 2. Meet probability threshold
-        # 3. Not the same unit (diagonal)
-        valid_pairs = torch.nonzero(
-            (struct_distances >= 10) &  # min_dist
-            (struct_distances <= 50) &  # max_dist
-            (form_prob_matrix < 0.0001) &  # probability threshold
-            (struct_distances > 0)  # exclude self-bonds
-        )
+            # Attempt to form bonds for valid pairs
+            for i, j in valid_pairs:
+                unit_i = str_indices[i].item()
+                unit_j = str_indices[j].item()
+                simul.things.bonds.form(unit_i, unit_j,
+                                        simul.things.positions[struct_mask])
 
-        # Attempt to form bonds for valid pairs
-        for i, j in valid_pairs:
-            unit_i = struct_indices[i].item()
-            unit_j = struct_indices[j].item()
-            simul.things.bonds.form(unit_i, unit_j, simul.things.positions)
+            # Check existing bonds for breaking
+            bonds = simul.things.bonds.bonds
+            for i in range(len(bonds)):
+                for j, bonded_idx in enumerate(bonds[i]):
+                    if bonded_idx == torch.inf:
+                        continue
 
-        # Check existing bonds for breaking
-        bonds = simul.things.bonds.bonds
-        for i in range(len(bonds)):
-            for j, bonded_idx in enumerate(bonds[i]):
-                if bonded_idx == float('inf'):
-                    continue
+                    # Get indices in the distance matrix
+                    i_dist = torch.nonzero(str_indices == i)[0]
+                    j_dist = torch.nonzero(str_indices == bonded_idx.long())[0]
 
-                # Get indices in the distance matrix
-                i_dist = torch.nonzero(struct_indices == i)[0]
-                j_dist = torch.nonzero(struct_indices == int(bonded_idx))[0]
+                    dist = struct_distances[i_dist, j_dist]
 
-                dist = struct_distances[i_dist, j_dist]
-
-                # Breaking probability increases as distance approaches max
-                if dist >= 40:  # Start considering breaks at 40 units
-                    break_prob = 0.0001 * (dist - 40) / 10  # Linear increase from 40 to 50
-                    if break_prob_matrix[i_dist, j_dist] < break_prob:
-                        simul.things.bonds.break_bond(i, int(bonded_idx))
+                    # Breaking probability increases as distance approaches max
+                    if dist >= 40:
+                        break_prob = 0.0001 * (dist - 40) / 10
+                        if break_prob_matrix[i_dist, j_dist] < break_prob:
+                            simul.things.bonds.break_bond(i, int(bonded_idx))
