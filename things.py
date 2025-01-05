@@ -60,42 +60,62 @@ class Bonds:
 
     def validate(self, positions):
         # Create mask for units with 2 bonds
-        has_two_bonds = (self.bonds != torch.inf).sum(dim = 1) == 2
+        has_two_bonds = (self.bonds != torch.inf).sum(dim=1) == 2
+        # Create mask for units with 1 bond
+        has_one_bond = (self.bonds != torch.inf).sum(dim=1) == 1
 
-        # Fast return if no units have 2 bonds
-        if not has_two_bonds.any():
-            return torch.ones(self.StrPop, dtype = torch.bool)
-
-        # Get positions of bonded units
-        bond_pos1 = positions[self.bonds[has_two_bonds][:, 0].long()]
-        bond_pos2 = positions[self.bonds[has_two_bonds][:, 1].long()]
-        unit_pos = positions[has_two_bonds]
-
-        # Calculate vectors and distances
-        vec1 = bond_pos1 - unit_pos
-        vec2 = bond_pos2 - unit_pos
-        dist1 = torch.norm(vec1, dim = 1)
-        dist2 = torch.norm(vec2, dim = 1)
-
-        # Check distances
-        valid_dist = (
-            (dist1 >= self.min_dist) &
-            (dist1 <= self.max_dist) &
-            (dist2 >= self.min_dist) &
-            (dist2 <= self.max_dist)
-        )
-
-        # Normalize vectors and distances
-        vec1 = vec1 / torch.norm(vec1, dim = 1, keepdim = True)
-        vec2 = vec2 / torch.norm(vec2, dim = 1, keepdim = True)
-
-        # Calculate angles
-        angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
-        valid_angle = angles >= self.min_angle
+        # Fast return if no units have any bonds
+        if not (has_two_bonds.any() or has_one_bond.any()):
+            return torch.ones(self.StrPop, dtype=torch.bool)
 
         # Create final mask
-        mask = torch.ones(self.StrPop, dtype = torch.bool)
-        mask[has_two_bonds] = valid_angle & valid_dist
+        mask = torch.ones(self.StrPop, dtype=torch.bool)
+
+        # Check single-bonded units
+        if has_one_bond.any():
+            # Get positions of single-bonded pairs
+            single_bond_pos = positions[has_one_bond]
+            bonded_indices = self.bonds[has_one_bond][:,0]  # Take first bond (since other is inf)
+            bonded_pos = positions[bonded_indices.long()]
+
+            # Calculate distances
+            dist = torch.norm(single_bond_pos - bonded_pos, dim=1)
+
+            # Update mask for single-bonded units
+            valid_dist = (dist >= self.min_dist) & (dist <= self.max_dist)
+            mask[has_one_bond] = valid_dist
+
+        # Check double-bonded units if any exist
+        if has_two_bonds.any():
+            # Get positions of bonded units
+            bond_pos1 = positions[self.bonds[has_two_bonds][:, 0].long()]
+            bond_pos2 = positions[self.bonds[has_two_bonds][:, 1].long()]
+            unit_pos = positions[has_two_bonds]
+
+            # Calculate vectors and distances
+            vec1 = bond_pos1 - unit_pos
+            vec2 = bond_pos2 - unit_pos
+            dist1 = torch.norm(vec1, dim=1)
+            dist2 = torch.norm(vec2, dim=1)
+
+            # Check distances
+            valid_dist = (
+                (dist1 >= self.min_dist) &
+                (dist1 <= self.max_dist) &
+                (dist2 >= self.min_dist) &
+                (dist2 <= self.max_dist)
+            )
+
+            # Normalize vectors for angle calculation
+            vec1 = vec1 / torch.norm(vec1, dim=1, keepdim=True)
+            vec2 = vec2 / torch.norm(vec2, dim=1, keepdim=True)
+
+            # Calculate angles
+            angles = torch.acos(torch.sum(vec1 * vec2, dim=1))
+            valid_angle = angles >= self.min_angle
+
+            # Update mask for double-bonded units
+            mask[has_two_bonds] = valid_angle & valid_dist
 
         return mask
 

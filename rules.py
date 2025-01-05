@@ -72,8 +72,8 @@ def Rules(simul, n):
 
         # Attempt to form bonds for valid pairs
         for i, j in valid_pairs:
-            unit_i = struct_indices[i]
-            unit_j = struct_indices[j]
+            unit_i = struct_indices[i].item()
+            unit_j = struct_indices[j].item()
             simul.things.bonds.form(unit_i, unit_j, simul.things.positions)
 
         # Check existing bonds for breaking
@@ -85,12 +85,12 @@ def Rules(simul, n):
 
                 # Get indices in the distance matrix
                 i_dist = torch.nonzero(struct_indices == i)[0]
-                j_dist = torch.nonzero(struct_indices == bonded_idx)[0]
+                j_dist = torch.nonzero(struct_indices == int(bonded_idx))[0]
 
                 dist = struct_distances[i_dist, j_dist]
 
                 # Breaking probability increases as distance approaches max
                 if dist >= 40:  # Start considering breaks at 40 units
-                    break_prob = 0.00001 * (dist - 40) / 10  # Linear increase from 40 to 50
+                    break_prob = 0.0001 * (dist - 40) / 10  # Linear increase from 40 to 50
                     if break_prob_matrix[i_dist, j_dist] < break_prob:
-                        simul.things.bonds.break_bond(i, bonded_idx)
+                        simul.things.bonds.break_bond(i, int(bonded_idx))
