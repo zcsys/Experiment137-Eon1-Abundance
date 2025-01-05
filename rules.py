@@ -8,10 +8,12 @@ def Rules(simul, n):
 
     # Coming into existence and perishing
     if 0 in n:
+        change_occured = False
         fission_mask = simul.things.energies >= AUTO_FISSION_THRESHOLD
-        for i, mask in enumerate(fission_mask):
-            if mask:
+        if fission_mask.any():
+            for i in fission_mask.nonzero().squeeze(1):
                 simul.things.monad_division(i)
+            change_occured = True
         if simul.period > 0 or simul.epoch > 0:
             simul.things.energies -= METABOLIC_ACTIVITY
         else:
@@ -19,7 +21,12 @@ def Rules(simul, n):
         to_remove = torch.nonzero(simul.things.energies <= 0)
         if len(to_remove) > 0:
             simul.things.perish_monad(to_remove.squeeze(1).tolist())
+            change_occured = True
         simul.things.E = simul.things.energies.sum().item() // 1000
+        if change_occured:
+            _, simul.things.distances, simul.things.diffs = vicinity(
+                simul.things.positions
+            )
 
     # Population control
     if 1 in n:
@@ -40,35 +47,37 @@ def Rules(simul, n):
 
     # Resource management
     if 2 in n:
-        simul.things.add_energyUnits_atGridCells(simul.grid.grid[0][1],
-                                                 ENERGY_THRESHOLD)
+        if simul.things.add_energyUnits_atGridCells(simul.grid.grid[0][1],
+                                                    ENERGY_THRESHOLD):
+            _, simul.things.distances, simul.things.diffs = vicinity(
+                simul.things.positions
+            )
 
     # Bond formation and breaking
     if 3 in n:
         # Get structural unit indices and distances
         struct_mask = simul.things.structure_mask
         if struct_mask.any():
-            # Recompute distances for current configuration
-            _, distances, _ = vicinity(simul.things.positions)
             str_indices = torch.nonzero(struct_mask).squeeze(1)
-            struct_distances = distances[struct_mask][:, struct_mask]
+            str_distances = simul.things.distances[struct_mask][:, struct_mask]
 
             # Create probability matrices for bond formation and breaking
-            form_prob_matrix = torch.rand_like(struct_distances)
-            break_prob_matrix = torch.rand_like(struct_distances)
+            form_prob_matrix = torch.rand_like(str_distances)
+            break_prob_matrix = torch.rand_like(str_distances)
 
             # Find pairs for bond formation that meet criteria
             valid_pairs = torch.nonzero(
-                (struct_distances >= 10) &  # min_dist
-                (struct_distances <= 50) &  # max_dist
-                (form_prob_matrix < 0.0001) &  # probability threshold
-                (struct_distances > 0)  # exclude self-bonds
+                (str_distances >= 10) &  # min_dist
+                (str_distances <= 50) &  # max_dist
+                (form_prob_matrix < 0.01) &  # probability threshold
+                (str_distances > 0)  # exclude self-bonds
             )
 
             # Attempt to form bonds for valid pairs
             for i, j in valid_pairs:
-                simul.things.bonds.form(i, j,
-                                        simul.things.positions[struct_mask])
+                simul.things.bonds.form_bond(
+                    i, j, simul.things.positions[struct_mask]
+                )
 
             # Check existing bonds for breaking
             bonds = simul.things.bonds.bonds
@@ -78,10 +87,10 @@ def Rules(simul, n):
                         continue
 
                     bonded_idx = bonded_idx.long()
-                    dist = struct_distances[i, bonded_idx]
+                    dist = str_distances[i, bonded_idx]
 
                     # Breaking probability increases as distance approaches max
                     if dist > 40:
-                        break_prob = 0.0001 * (dist - 40)
+                        break_prob = 0.00001 * (dist - 40)
                         if break_prob_matrix[i, j] < break_prob:
                             simul.things.bonds.break_bond(i, bonded_idx)

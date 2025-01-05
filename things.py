@@ -23,7 +23,7 @@ class Bonds:
         available_slots = (self.bonds[i] == torch.inf).nonzero()
         return available_slots[0].item() if len(available_slots) > 0 else None
 
-    def form(self, i, j, positions):
+    def form_bond(self, i, j, positions):
         if i == j or (self.bonds[i] == j).any() or (self.bonds[j] == i).any():
             return
 
@@ -171,6 +171,7 @@ class Things:
             ),
             dim = 1
         )
+        self.distances = None
         self.bonds = torch.empty(0)
 
         # Initialize genomes and lineages
@@ -215,7 +216,10 @@ class Things:
 
         # For each monad, the combined effect of energy particles in their
         # vicinity is calculated.
-        indices, self.distances, self.diffs = vicinity(self.positions)
+        if self.distances == None:
+            _, self.distances, self.diffs = vicinity(self.positions)
+        else:
+            pass
         if self.monad_mask.any() and self.energy_mask.any():
             col1  = (
                 self.diffs[self.monad_mask][:, self.energy_mask] /
@@ -578,6 +582,9 @@ class Things:
             energy_idx_general = torch.where(self.energy_mask)[0][energy_idx]
             self.remove_energyUnits(unique(energy_idx_general.tolist()))
 
+        # Update vicinity matrices
+        _, self.distances, self.diffs = vicinity(self.positions)
+
     def monad_division(self, i):
         # Set out main attributes and see if division is possible
         thing_type = "monad"
@@ -817,7 +824,7 @@ class Things:
 
         N = len(positions_to_add)
         if N == 0:
-            return
+            return 0
         self.N += N
 
         for _ in range(N):
@@ -867,6 +874,8 @@ class Things:
             ),
             dim = 0
         )
+
+        return 1
 
     def remove_energyUnits(self, indices):
         for i in indices[::-1]:
@@ -1009,6 +1018,7 @@ class Things:
         pygame.font.init()
         self.font = pygame.font.SysFont(None, 12)
 
+        self.distances = None
         self.initialize_bonds()
         self.bonds.bonds = torch.tensor(state['bonds'])
 
