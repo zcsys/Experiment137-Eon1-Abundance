@@ -232,7 +232,7 @@ class Simulation:
 
                 if not self.paused:
                     self.things.final_action(self.grid)
-                    Rules(self, [0, 1, 2])
+                    Rules(self, [0, 1, 2, 3])
                     self.update_state()
 
                 self.screen.fill(colors["0"])

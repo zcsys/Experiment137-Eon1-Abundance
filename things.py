@@ -23,7 +23,7 @@ class Bonds:
         available_slots = (self.bonds[i] == torch.inf).nonzero()
         return available_slots[0].item() if len(available_slots) > 0 else None
 
-    def form(self, i, j):
+    def form(self, i, j, positions):
         if (self.bonds[i] == j).any() or (self.bonds[j] == i).any():
             return
 
@@ -514,6 +514,10 @@ class Things:
             ~collision_mask &
             enough_energy
         )
+        final_apply_mask[self.structure_mask] = (
+            final_apply_mask[self.structure_mask] &
+            self.bonds.validate(provisional_positions[self.structure_mask])
+        )
 
         # Apply the movements
         self.positions = torch.where(
@@ -860,6 +864,31 @@ class Things:
         self.memory_mask = self.memory_mask[mask]
 
     def draw(self, screen, show_info = True, show_sight = False):
+        # First draw bonds between structural units
+        if self.structure_mask.any():
+            struct_positions = self.positions[self.structure_mask]
+            struct_indices = torch.nonzero(self.structure_mask).squeeze(1)
+
+            # Draw bonds
+            if hasattr(self, 'bonds') and hasattr(self.bonds, 'bonds'):
+                for i in range(len(self.bonds.bonds)):
+                    for j, bonded_idx in enumerate(self.bonds.bonds[i]):
+                        if bonded_idx == float('inf'):
+                            continue
+                        # Only draw each bond once
+                        if i < bonded_idx:
+                            start_pos = struct_positions[i]
+                            # Fixed: properly index into struct_positions
+                            bonded_idx_local = torch.where(struct_indices == bonded_idx)[0][0]
+                            end_pos = struct_positions[bonded_idx_local]
+                            pygame.draw.line(
+                                screen,
+                                colors["RGB"],  # White line for bonds
+                                (int(start_pos[0].item()), int(start_pos[1].item())),
+                                (int(end_pos[0].item()), int(end_pos[1].item())),
+                                1  # Line width
+                            )
+
         for i, pos in enumerate(self.positions):
             thing_type = self.thing_types[i]
             thing_color = self.colors[i]
