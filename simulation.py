@@ -156,7 +156,9 @@ class Simulation:
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption(
-            "Experiment 137 - Eon 1 Era 3: Nanobiota"
+            "Experiment 137: The Logic of Life    <>    " +
+            "Eon 1: Abundance    <>    " +
+            "Era 3: Nanobiota"
         )
         self.things = things_object
         self.age_start_time = time.time()
@@ -176,6 +178,7 @@ class Simulation:
 
         self.grid = Grid()
         self.things.add_structuralUnits(240)
+        self.things.initialize_bonds()
 
         self.paused = False
         self.ui_manager = UIManager(self.screen, MENU_WIDTH, self.paused)

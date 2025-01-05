@@ -9,6 +9,96 @@ from nn import *
 from simulation import draw_dashed_circle
 from diffusion import Grid
 
+class Bonds:
+    def __init__(self, StrPop, valence = 2, min_angle = 120, min_dist = 10,
+                 max_dist = 50):
+        self.StrPop = StrPop
+        self.valence = valence
+        self.min_angle = min_angle * math.pi / 180
+        self.min_dist = min_dist
+        self.max_dist = max_dist
+        self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
+
+    def get_first_available_slot(self, i):
+        available_slots = (self.bonds[i] == torch.inf).nonzero()
+        return available_slots[0].item() if len(available_slots) > 0 else None
+
+    def form(self, i, j):
+        if (self.bonds[i] == j).any() or (self.bonds[j] == i).any():
+            return
+
+        i_slot = self.get_first_available_slot(i)
+        j_slot = self.get_first_available_slot(j)
+
+        if (i_slot is not None and j_slot is not None and
+            self.check_constraints(i, j, positions)):
+            self.bonds[i][i_slot] = j
+            self.bonds[j][j_slot] = i
+
+    def break_bond(self, i, j):
+        i_slot = (self.bonds[i] == j).nonzero()
+        j_slot = (self.bonds[j] == i).nonzero()
+
+        if len(i_slot) > 0 and len(j_slot) > 0:
+            self.bonds[i][i_slot[0]] = torch.inf
+            self.bonds[j][j_slot[0]] = torch.inf
+
+    def check_constraints(self, i, j, pos):
+        dist = torch.norm(pos[i] - pos[j])
+        if not (self.min_dist <= dist <= self.max_dist):
+            return False
+
+        i_bonds = self.bonds[i][self.bonds[i] != torch.inf]
+        j_bonds = self.bonds[j][self.bonds[j] != torch.inf]
+
+        return ~(
+            len(i_bonds) > 0 and
+            angle(pos[i], pos[i_bonds[0].long()], pos[j]) < self.min_angle or
+            len(j_bonds) > 0 and
+            angle(pos[j], pos[j_bonds[0].long()], pos[i]) < self.min_angle
+        )
+
+    def validate(self, positions):
+        # Create mask for units with 2 bonds
+        has_two_bonds = (self.bonds != torch.inf).sum(dim = 1) == 2
+
+        # Fast return if no units have 2 bonds
+        if not has_two_bonds.any():
+            return torch.ones(self.StrPop, dtype = torch.bool)
+
+        # Get positions of bonded units
+        bond_pos1 = positions[self.bonds[has_two_bonds][:, 0].long()]
+        bond_pos2 = positions[self.bonds[has_two_bonds][:, 1].long()]
+        unit_pos = positions[has_two_bonds]
+
+        # Calculate vectors and distances
+        vec1 = bond_pos1 - unit_pos
+        vec2 = bond_pos2 - unit_pos
+        dist1 = torch.norm(vec1, dim = 1)
+        dist2 = torch.norm(vec2, dim = 1)
+
+        # Check distances
+        valid_dist = (
+            (dist1 >= self.min_dist) &
+            (dist1 <= self.max_dist) &
+            (dist2 >= self.min_dist) &
+            (dist2 <= self.max_dist)
+        )
+
+        # Normalize vectors and distances
+        vec1 = vec1 / torch.norm(vec1, dim = 1, keepdim = True)
+        vec2 = vec2 / torch.norm(vec2, dim = 1, keepdim = True)
+
+        # Calculate angles
+        angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
+        valid_angle = angles >= self.min_angle
+
+        # Create final mask
+        mask = torch.ones(self.StrPop, dtype = torch.bool)
+        mask[has_two_bonds] = valid_angle & valid_dist
+
+        return mask
+
 class Things:
     def __init__(self, thing_types = None, state_file = None):
         # Initialize font
@@ -60,6 +150,7 @@ class Things:
             ),
             dim = 1
         )
+        self.bonds = torch.empty(0)
 
         # Initialize genomes and lineages
         self.genomes = torch.cat(
@@ -152,7 +243,7 @@ class Things:
         if self.monad_mask.any() and self.structure_mask.any():
             dist = self.distances[self.monad_mask][:, self.structure_mask]
             self.dist_mnd_str, self.structure_indices = torch.topk(
-                dist.masked_fill(dist == 0, float('inf')),
+                dist.masked_fill(dist == 0, torch.inf),
                 k = min(6, self.structure_mask.sum()),
                 dim = 1,
                 largest = False
@@ -817,7 +908,8 @@ class Things:
             'lineages': self.lineages,
             'colors': self.colors,
             'memory': self.memory.tolist(),
-            'Rotation': self.Rotation.tolist()
+            'Rotation': self.Rotation.tolist(),
+            'bonds': self.bonds.bonds.tolist()
         }
 
     def load_state(self, state_file):
@@ -864,6 +956,9 @@ class Things:
 
         pygame.font.init()
         self.font = pygame.font.SysFont(None, 12)
+
+        self.initialize_bonds()
+        self.bonds.bonds = torch.tensor(state['bonds'])
 
     def add_structuralUnits(self, POP_STR = 1):
         self.thing_types += ["structuralUnit" for _ in range(POP_STR)]
@@ -961,3 +1056,6 @@ class Things:
             ),
             dim = 0
         )
+
+    def initialize_bonds(self):
+        self.bonds = Bonds(self.structure_mask.sum().item())

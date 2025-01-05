@@ -100,3 +100,12 @@ def decompose_vectors_better(X, R):
     ).unsqueeze(1)
     N, total_dims = X.shape
     return rotation_matrix @ X.view(N, total_dims // 2, 2)
+
+def angle(pos0, pos1, pos2):
+    vec1 = pos1 - pos0
+    vec2 = pos2 - pos0
+
+    vec1 = vec1 / torch.norm(vec1)
+    vec2 = vec2 / torch.norm(vec2)
+
+    return torch.acos(torch.dot(vec1, vec2))
