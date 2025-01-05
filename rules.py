@@ -57,10 +57,7 @@ def Rules(simul, n):
             form_prob_matrix = torch.rand_like(struct_distances)
             break_prob_matrix = torch.rand_like(struct_distances)
 
-            # Find pairs for bond formation that meet criteria:
-            # 1. Within distance range (10-50 as defined in Bonds class)
-            # 2. Meet probability threshold
-            # 3. Not the same unit (diagonal)
+            # Find pairs for bond formation that meet criteria
             valid_pairs = torch.nonzero(
                 (struct_distances >= 10) &  # min_dist
                 (struct_distances <= 50) &  # max_dist
@@ -70,9 +67,7 @@ def Rules(simul, n):
 
             # Attempt to form bonds for valid pairs
             for i, j in valid_pairs:
-                unit_i = str_indices[i].item()
-                unit_j = str_indices[j].item()
-                simul.things.bonds.form(unit_i, unit_j,
+                simul.things.bonds.form(i, j,
                                         simul.things.positions[struct_mask])
 
             # Check existing bonds for breaking
@@ -82,14 +77,11 @@ def Rules(simul, n):
                     if bonded_idx == torch.inf:
                         continue
 
-                    # Get indices in the distance matrix
-                    i_dist = torch.nonzero(str_indices == i)[0]
-                    j_dist = torch.nonzero(str_indices == bonded_idx.long())[0]
-
-                    dist = struct_distances[i_dist, j_dist]
+                    bonded_idx = bonded_idx.long()
+                    dist = struct_distances[i, bonded_idx]
 
                     # Breaking probability increases as distance approaches max
-                    if dist >= 40:
-                        break_prob = 0.0001 * (dist - 40) / 10
-                        if break_prob_matrix[i_dist, j_dist] < break_prob:
-                            simul.things.bonds.break_bond(i, int(bonded_idx))
+                    if dist > 40:
+                        break_prob = 0.0001 * (dist - 40)
+                        if break_prob_matrix[i, j] < break_prob:
+                            simul.things.bonds.break_bond(i, bonded_idx)
