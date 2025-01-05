@@ -10,11 +10,12 @@ from simulation import draw_dashed_circle
 from diffusion import Grid
 
 class Bonds:
-    def __init__(self, StrPop, valence = 2, min_angle = 120, min_dist = 10,
-                 max_dist = 50):
+    def __init__(self, StrPop, valence = 2, min_angle = 120, max_angle = 240,
+                 min_dist = 10, max_dist = 50):
         self.StrPop = StrPop
         self.valence = valence
         self.min_angle = min_angle * math.pi / 180
+        self.max_angle = max_angle * math.pi / 180
         self.min_dist = min_dist
         self.max_dist = max_dist
         self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
@@ -44,19 +45,29 @@ class Bonds:
             self.bonds[j][j_slot[0]] = torch.inf
 
     def check_constraints(self, i, j, pos):
-        dist = torch.norm(pos[i] - pos[j])
+        dist = torch.norm(pos[j] - pos[i])
         if not (self.min_dist <= dist <= self.max_dist):
             return False
 
         i_bonds = self.bonds[i][self.bonds[i] != torch.inf]
-        j_bonds = self.bonds[j][self.bonds[j] != torch.inf]
+        if (len(i_bonds) > 0 and
+            ~(
+                self.min_angle <=
+                angle(pos[i], pos[i_bonds[0].long()], pos[j]) <=
+                self.max_angle
+            )):
+            return False
 
-        return ~(
-            len(i_bonds) > 0 and
-            angle(pos[i], pos[i_bonds[0].long()], pos[j]) < self.min_angle or
-            len(j_bonds) > 0 and
-            angle(pos[j], pos[j_bonds[0].long()], pos[i]) < self.min_angle
-        )
+        j_bonds = self.bonds[j][self.bonds[j] != torch.inf]
+        if (len(j_bonds) > 0 and
+            ~(
+                self.min_angle <=
+                angle(pos[j], pos[j_bonds[0].long()], pos[i]) <=
+                self.max_angle
+            )):
+            return False
+
+        return True
 
     def validate(self, positions):
         # Create masks
@@ -111,7 +122,10 @@ class Bonds:
 
             # Check angles
             angles = torch.acos(torch.sum(vec1 * vec2, dim=1))
-            valid_angle = angles >= self.min_angle
+            valid_angle = (
+                (angles >= self.min_angle) &
+                (angles <= self.max_angle)
+            )
             not_val = self.bonds[has_two_bonds][~valid_angle].view(1, -1).long()
 
             # Update final mask
@@ -1069,7 +1083,17 @@ class Things:
         self.str_manipulations = torch.cat(
             (
                 self.str_manipulations,
-                torch.rand((POP_STR, 2, 3), dtype = torch.float32) * 20 - 10
+                torch.cat(
+                    (
+                        torch.zeros((POP_STR, 2, 1), dtype = torch.float32),
+                        torch.rand(
+                            (POP_STR, 2, 1),
+                            dtype = torch.float32
+                        ) * 20 - 10,
+                        torch.zeros((POP_STR, 2, 1), dtype = torch.float32)
+                    ),
+                    dim = 2
+                )
             ),
             dim = 0
         )
