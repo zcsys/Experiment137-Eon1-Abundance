@@ -75,7 +75,10 @@ class Bonds:
         if has_one_bond.any():
             # Get positions of single-bonded pairs
             single_bond_pos = positions[has_one_bond]
-            bonded_indices = self.bonds[has_one_bond][:,0]  # Take first bond (since other is inf)
+            # Get indices of the bonded pairs (excluding inf)
+            bonded_indices = torch.where(self.bonds[has_one_bond] != torch.inf,
+                                       self.bonds[has_one_bond],
+                                       torch.zeros_like(self.bonds[has_one_bond])).max(dim=1)[0]
             bonded_pos = positions[bonded_indices.long()]
 
             # Calculate distances
