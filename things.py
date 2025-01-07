@@ -124,9 +124,7 @@ class Bonds:
             angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
             inv_angles = angles < self.min_angle
             inv_indices = has_two_bonds.nonzero().squeeze(1)[inv_angles]
-            not_valid = self.bonds[inv_indices]
-            if inv_angles.any():
-                print("Invalid angles:", angles[inv_angles].tolist())
+            not_valid = self.bonds[inv_indices].view(-1)
             return inv_indices, not_valid
         return None, None
 
@@ -549,21 +547,24 @@ class Things:
             ~collision_mask &
             enough_energy
         )
+
+        positions_before_bond_restrictions = torch.where(
+            final_apply_mask.unsqueeze(1),
+            provisional_positions,
+            self.positions
+        )
+
         final_apply_mask[self.structure_mask] = (
             final_apply_mask[self.structure_mask] &
             self.bonds.validate(
-                torch.where(
-                    final_apply_mask.unsqueeze(1),
-                    provisional_positions,
-                    self.positions
-                )[self.structure_mask]
+                positions_before_bond_restrictions[self.structure_mask]
             )
         )
 
         # Apply the movements
         self.positions = torch.where(
             final_apply_mask.unsqueeze(1),
-            provisional_positions,
+            positions_before_bond_restrictions,
             self.positions
         )
 

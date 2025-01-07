@@ -224,7 +224,7 @@ class Simulation:
 
         try:
             while running:
-                # print("\n\n==== BEGIN STEP ====\n")
+                print("\n\n==== BEGIN STEP ====\n")
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         running = False
