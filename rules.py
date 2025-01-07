@@ -91,6 +91,6 @@ def Rules(simul, n):
 
                     # Breaking probability increases as distance approaches max
                     if dist > 40:
-                        break_prob = 0.00001 * (dist - 40)
+                        break_prob = 0.0001 * (dist - 40)
                         if break_prob_matrix[i, j] < break_prob:
                             simul.things.bonds.break_bond(i, bonded_idx)

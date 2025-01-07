@@ -306,9 +306,15 @@ class Things:
         if SYSTEM_HEAT == 0:
             return torch.tensor([[0, 0] for _ in range(numberOf_energyUnits)],
                                 dtype = torch.float32)
-        values = (torch.tensor(list(range(SYSTEM_HEAT)), dtype = torch.float32)
-                  - (SYSTEM_HEAT - 1) / 2)
-        weights = torch.ones(SYSTEM_HEAT, dtype = torch.float32)
+        values = (
+            torch.tensor(
+                list(
+                    range(SYSTEM_HEAT * 2 + 1)
+                ),
+                dtype = torch.float32
+            ) - SYSTEM_HEAT
+        )
+        weights = torch.ones(SYSTEM_HEAT * 2 + 1, dtype = torch.float32)
         indices = torch.multinomial(
             weights,
             numberOf_energyUnits * 2,
@@ -405,7 +411,7 @@ class Things:
             0,
             expanded_indices.view(-1, 2),
             movement_contributions.view(-1, 2)
-        ) * 5.
+        ) * SYSTEM_HEAT
 
     def rotation_and_movement(self, neural_action):
         self.Rotation += torch.where(
@@ -428,7 +434,15 @@ class Things:
         return movements
 
     def background_repulsion(self):
-        pass
+        mask = self.monad_mask | self.structure_mask
+        numerator = self.diffs[mask][:, mask]
+        denominator = (self.distances[mask][:, mask] + epsilon).unsqueeze(2)
+        unit_vectors = numerator / denominator
+        self.movement_tensor[mask] -= (
+            (15 - self.distances[mask][:, mask]).clamp(
+                0, SYSTEM_HEAT
+            ).unsqueeze(2) * unit_vectors
+        ).sum(dim = 1)
 
     def final_action(self, grid):
         # Update sensory inputs
@@ -459,7 +473,7 @@ class Things:
                 self.movement_tensor[self.structure_mask] = self.re_action(
                     grid,
                     neural_action[:, 3:33]
-                ).clamp_(-5, 5)
+                ).clamp_(-SYSTEM_HEAT, SYSTEM_HEAT)
             else:
                 self.movement_tensor[self.structure_mask] = torch.zeros(
                     (self.structure_mask.sum(), 2),
