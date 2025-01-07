@@ -20,7 +20,7 @@ class Bonds:
         self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
 
     def get_first_available_slot(self, i):
-        available_slots = (self.bonds[i] == torch.inf).nonzero()
+        available_slots = torch.where(self.bonds[i] == torch.inf)[0]
         return available_slots[0].item() if len(available_slots) > 0 else None
 
     def form_bond(self, i, j, positions):
@@ -36,8 +36,8 @@ class Bonds:
             self.bonds[j][j_slot] = i
 
     def break_bond(self, i, j):
-        i_slot = (self.bonds[i] == j).nonzero().squeeze(1)
-        j_slot = (self.bonds[j] == i).nonzero().squeeze(1)
+        i_slot = torch.where(self.bonds[i] == j)[0]
+        j_slot = torch.where(self.bonds[j] == i)[0]
 
         if len(i_slot) > 0:
             self.bonds[i][i_slot] = torch.inf
@@ -112,21 +112,6 @@ class Bonds:
             ] = False
 
         return final_mask
-
-    def invalid_angles(self, positions):
-        has_two_bonds = (self.bonds != torch.inf).sum(dim = 1) == 2
-        if has_two_bonds.any():
-            unit_pos = positions[has_two_bonds]
-            vec1 = positions[self.bonds[has_two_bonds][:, 0].long()] - unit_pos
-            vec2 = positions[self.bonds[has_two_bonds][:, 1].long()] - unit_pos
-            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
-            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
-            angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
-            inv_angles = angles < self.min_angle
-            inv_indices = has_two_bonds.nonzero().squeeze(1)[inv_angles]
-            not_valid = self.bonds[inv_indices].view(-1)
-            return inv_indices, not_valid
-        return None, None
 
 class Things:
     def __init__(self, thing_types = None, state_file = None):
@@ -435,10 +420,15 @@ class Things:
             ),
             dim = 1
         )
-        return torch.clamp_(
+        movements = torch.clamp(
             neural_action[:, 1],
             min = 0
         ).unsqueeze(1) * self.U * 5.
+        self.energies -= torch.norm(movements, dim = 1)
+        return movements
+
+    def background_repulsion(self):
+        pass
 
     def final_action(self, grid):
         # Update sensory inputs
@@ -469,7 +459,7 @@ class Things:
                 self.movement_tensor[self.structure_mask] = self.re_action(
                     grid,
                     neural_action[:, 3:33]
-                )
+                ).clamp_(-5, 5)
             else:
                 self.movement_tensor[self.structure_mask] = torch.zeros(
                     (self.structure_mask.sum(), 2),
@@ -481,135 +471,52 @@ class Things:
             for i in (neural_action[:, 2] > torch.rand(self.Pop)).nonzero():
                 self.monad_division(i.item())
 
-        # Apply movements
+        # Calculate background repulsion and apply movements
+        self.background_repulsion()
         self.update_positions()
 
         # Update total monad energy
         self.E = self.energies.sum().item() // 1000
 
     def update_positions(self):
-        provisional_positions = self.positions + self.movement_tensor
-
-        # Apply rigid boundaries
-        provisional_positions = torch.stack(
+        # Apply movement tensor
+        self.positions += self.movement_tensor
+        self.positions = torch.stack(
             [
                 torch.clamp(
-                    provisional_positions[:, 0],
+                    self.positions[:, 0],
                     min = self.sizes,
                     max = SIMUL_WIDTH - self.sizes
                 ),
                 torch.clamp(
-                    provisional_positions[:, 1],
+                    self.positions[:, 1],
                     min = self.sizes,
                     max = SIMUL_HEIGHT - self.sizes
                 )
             ],
             dim = 1
         )
-
-        # Get neighboring things
-        indices, distances, diffs = vicinity(provisional_positions)
-
-        # Monad-monad collisions
-        dist = distances[self.monad_mask][:, self.monad_mask]
-        collision_mask = (
-            (0. < dist) & (dist < THING_TYPES["monad"]["size"] * 2)
-        ).any(dim = 1)
-
-        # StructureUnit-anything collisions
-        size_sums = (
-            self.sizes + THING_TYPES["structuralUnit"]["size"]
-        ).unsqueeze(1)
-
-        dist = distances[:, self.structure_mask]
-        collision_mask_str = (
-            (0. < dist) &
-            (dist < size_sums)
-        ).any(dim = 1)
-
-        dist = distances[self.structure_mask]
-        collision_mask_str[self.structure_mask] = (
-            (0. < dist) &
-            (dist < size_sums[self.structure_mask])
-        ).any(dim = 1)
-
-        # Check energy levels
-        movement_magnitudes = torch.norm(
-            self.movement_tensor[self.monad_mask],
-            dim = 1
-        )
-        enough_energy = self.energies >= movement_magnitudes
-
-        # Construct final apply mask
-        final_apply_mask = ~collision_mask_str
-        final_apply_mask[self.monad_mask] = (
-            ~collision_mask_str[self.monad_mask] &
-            ~collision_mask &
-            enough_energy
-        )
-
-        positions_before_bond_restrictions = torch.where(
-            final_apply_mask.unsqueeze(1),
-            provisional_positions,
-            self.positions
-        )
-
-        final_apply_mask[self.structure_mask] = (
-            final_apply_mask[self.structure_mask] &
-            self.bonds.validate(
-                positions_before_bond_restrictions[self.structure_mask]
-            )
-        )
-
-        # Apply the movements
-        self.positions = torch.where(
-            final_apply_mask.unsqueeze(1),
-            positions_before_bond_restrictions,
-            self.positions
-        )
-
-        invalid_angle_indices, others_involved = self.bonds.invalid_angles(
-            self.positions[self.structure_mask]
-        )
-        if invalid_angle_indices is not None and len(invalid_angle_indices) > 0:
-            print("Invalid angle indices after position update:",
-                  invalid_angle_indices)
-            print("Others involved:",
-                  others_involved)
-
-        # Reduce energies from monads
-        actual_magnitudes = torch.where(
-            final_apply_mask[self.monad_mask],
-            movement_magnitudes,
-            torch.tensor([0.])
-        )
-        self.energies -= actual_magnitudes
+        _, self.distances, self.diffs = vicinity(self.positions)
 
         # EnergyUnit-monad collisions
-        energy_monad_dist = distances[self.energy_mask][:, self.monad_mask]
+        energy_monad_dist = self.distances[self.energy_mask][:, self.monad_mask]
         energy_collision_mask = (
             (0. < energy_monad_dist) &
-            (energy_monad_dist < (THING_TYPES["monad"]["size"] +
-                                 THING_TYPES["energyUnit"]["size"]))
+            (energy_monad_dist < (THING_TYPES["monad"]["size"]))
         )
 
         if energy_collision_mask.any():
             energy_idx, monad_idx = energy_collision_mask.nonzero(
                 as_tuple = True
             )
-            energy_per_monad = (
-                UNIT_ENERGY / energy_collision_mask[energy_idx].sum(dim = 1)
-            )
             self.energies.scatter_add_(
                 0,
                 monad_idx,
-                energy_per_monad
+                UNIT_ENERGY.expand_as(monad_idx)
             )
             energy_idx_general = torch.where(self.energy_mask)[0][energy_idx]
             self.remove_energyUnits(unique(energy_idx_general.tolist()))
-
-        # Update vicinity matrices
-        _, self.distances, self.diffs = vicinity(self.positions)
+            _, self.distances, self.diffs = vicinity(self.positions)
 
     def monad_division(self, i):
         # Set out main attributes and see if division is possible
