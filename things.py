@@ -10,12 +10,11 @@ from simulation import draw_dashed_circle
 from diffusion import Grid
 
 class Bonds:
-    def __init__(self, StrPop, valence = 2, min_angle = 120, max_angle = 240,
-                 min_dist = 10, max_dist = 50):
+    def __init__(self, StrPop, valence = 2, min_angle = 120, min_dist = 10,
+                 max_dist = 50):
         self.StrPop = StrPop
         self.valence = valence
         self.min_angle = min_angle * math.pi / 180
-        self.max_angle = max_angle * math.pi / 180
         self.min_dist = min_dist
         self.max_dist = max_dist
         self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
@@ -37,76 +36,58 @@ class Bonds:
             self.bonds[j][j_slot] = i
 
     def break_bond(self, i, j):
-        i_slot = (self.bonds[i] == j).nonzero()
-        j_slot = (self.bonds[j] == i).nonzero()
+        i_slot = (self.bonds[i] == j).nonzero().squeeze(1)
+        j_slot = (self.bonds[j] == i).nonzero().squeeze(1)
 
-        if len(i_slot) > 0 and len(j_slot) > 0:
-            self.bonds[i][i_slot[0]] = torch.inf
-            self.bonds[j][j_slot[0]] = torch.inf
+        if len(i_slot) > 0:
+            self.bonds[i][i_slot] = torch.inf
+            self.bonds[j][j_slot] = torch.inf
 
     def check_constraints(self, i, j, pos):
         dist = torch.norm(pos[j] - pos[i])
         if not (self.min_dist <= dist <= self.max_dist):
             return False
 
-        i_bonds = self.bonds[i][self.bonds[i] != torch.inf]
-        if (len(i_bonds) > 0 and
-            ~(
-                self.min_angle <=
-                angle(pos[i], pos[i_bonds[0].long()], pos[j]) <=
-                self.max_angle
-            )):
+        i_bonded = self.bonds[i][self.bonds[i] != torch.inf]
+        if (len(i_bonded) > 0 and
+            angle(pos[i], pos[i_bonded[0].long()], pos[j]) < self.min_angle):
             return False
 
-        j_bonds = self.bonds[j][self.bonds[j] != torch.inf]
-        if (len(j_bonds) > 0 and
-            ~(
-                self.min_angle <=
-                angle(pos[j], pos[j_bonds[0].long()], pos[i]) <=
-                self.max_angle
-            )):
+        j_bonded = self.bonds[j][self.bonds[j] != torch.inf]
+        if (len(j_bonded) > 0 and
+            angle(pos[j], pos[j_bonded[0].long()], pos[i]) < self.min_angle):
             return False
 
         return True
 
-    def validate(self, positions):
+    def validate(self, pos):
         # Create masks
         has_two_bonds = (self.bonds != torch.inf).sum(dim = 1) == 2
         has_one_bond = (self.bonds != torch.inf).sum(dim = 1) == 1
-
-        # Fast return if none
-        if not (has_two_bonds.any() or has_one_bond.any()):
-            return torch.ones(self.StrPop, dtype = torch.bool)
-
-        # Initialize final mask
-        mask = torch.ones(self.StrPop, dtype=torch.bool)
+        final_mask = torch.ones(self.StrPop, dtype = torch.bool)
 
         # Handle units with one bond
         if has_one_bond.any():
             dist = torch.norm(
                 (
-                    positions[has_one_bond] -
-                    positions[self.bonds[has_one_bond].min(dim = 1)[0].long()]
+                    pos[has_one_bond] -
+                    pos[self.bonds[has_one_bond].min(dim = 1).values.long()]
                 ),
                 dim = 1
             )
-            mask[has_one_bond] = (
+            final_mask[has_one_bond] = (
                 (dist >= self.min_dist) &
                 (dist <= self.max_dist)
             )
 
         # Handle units within a double-bond
         if has_two_bonds.any():
-            # Get positions
-            bond_pos1 = positions[self.bonds[has_two_bonds][:, 0].long()]
-            bond_pos2 = positions[self.bonds[has_two_bonds][:, 1].long()]
-            unit_pos = positions[has_two_bonds]
-
             # Calculate vectors and distances
-            vec1 = bond_pos1 - unit_pos
-            vec2 = bond_pos2 - unit_pos
-            dist1 = torch.norm(vec1, dim=1)
-            dist2 = torch.norm(vec2, dim=1)
+            unit_pos = pos[has_two_bonds]
+            vec1 = pos[self.bonds[has_two_bonds][:, 0].long()] - unit_pos
+            vec2 = pos[self.bonds[has_two_bonds][:, 1].long()] - unit_pos
+            dist1 = torch.norm(vec1, dim = 1)
+            dist2 = torch.norm(vec2, dim = 1)
 
             # Distance check
             valid_dist = (
@@ -117,22 +98,37 @@ class Bonds:
             )
 
             # Normalize vectors
-            vec1 = vec1 / torch.norm(vec1, dim=1, keepdim=True)
-            vec2 = vec2 / torch.norm(vec2, dim=1, keepdim=True)
+            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
+            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
 
-            # Check angles
-            angles = torch.acos(torch.sum(vec1 * vec2, dim=1))
-            valid_angle = (
-                (angles >= self.min_angle) &
-                (angles <= self.max_angle)
-            )
-            not_val = self.bonds[has_two_bonds][~valid_angle].view(1, -1).long()
+            # Angle check
+            angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
+            valid_angle = angles >= self.min_angle
 
             # Update final mask
-            mask[has_two_bonds] = valid_angle & valid_dist
-            mask[not_val] = torch.zeros_like(mask[not_val], dtype = torch.bool)
+            final_mask[has_two_bonds] = valid_angle & valid_dist
+            final_mask[
+                self.bonds[has_two_bonds][~valid_angle].view(-1).long()
+            ] = False
 
-        return mask
+        return final_mask
+
+    def invalid_angles(self, positions):
+        has_two_bonds = (self.bonds != torch.inf).sum(dim = 1) == 2
+        if has_two_bonds.any():
+            unit_pos = positions[has_two_bonds]
+            vec1 = positions[self.bonds[has_two_bonds][:, 0].long()] - unit_pos
+            vec2 = positions[self.bonds[has_two_bonds][:, 1].long()] - unit_pos
+            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
+            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
+            angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
+            inv_angles = angles < self.min_angle
+            inv_indices = has_two_bonds.nonzero().squeeze(1)[inv_angles]
+            not_valid = self.bonds[inv_indices]
+            if inv_angles.any():
+                print("Invalid angles:", angles[inv_angles].tolist())
+            return inv_indices, not_valid
+        return None, None
 
 class Things:
     def __init__(self, thing_types = None, state_file = None):
@@ -555,7 +551,13 @@ class Things:
         )
         final_apply_mask[self.structure_mask] = (
             final_apply_mask[self.structure_mask] &
-            self.bonds.validate(provisional_positions[self.structure_mask])
+            self.bonds.validate(
+                torch.where(
+                    final_apply_mask.unsqueeze(1),
+                    provisional_positions,
+                    self.positions
+                )[self.structure_mask]
+            )
         )
 
         # Apply the movements
@@ -564,6 +566,15 @@ class Things:
             provisional_positions,
             self.positions
         )
+
+        invalid_angle_indices, others_involved = self.bonds.invalid_angles(
+            self.positions[self.structure_mask]
+        )
+        if invalid_angle_indices is not None and len(invalid_angle_indices) > 0:
+            print("Invalid angle indices after position update:",
+                  invalid_angle_indices)
+            print("Others involved:",
+                  others_involved)
 
         # Reduce energies from monads
         actual_magnitudes = torch.where(
@@ -923,7 +934,7 @@ class Things:
                             end_pos = struct_positions[bonded_idx.long()]
                             pygame.draw.line(
                                 screen,
-                                colors["RGB"],
+                                colors["GB"],
                                 (
                                     int(start_pos[0].item()),
                                     int(start_pos[1].item())
