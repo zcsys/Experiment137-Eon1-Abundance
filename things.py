@@ -10,12 +10,10 @@ from simulation import draw_dashed_circle
 from diffusion import Grid
 
 class Bonds:
-    def __init__(self, StrPop, valence = 2, min_angle = 120, min_dist = 10,
-                 max_dist = 50):
+    def __init__(self, StrPop, valence = 2, min_angle = 120, max_dist = 50):
         self.StrPop = StrPop
         self.valence = valence
         self.min_angle = min_angle * math.pi / 180
-        self.min_dist = min_dist
         self.max_dist = max_dist
         self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
 
@@ -44,8 +42,7 @@ class Bonds:
             self.bonds[j][j_slot] = torch.inf
 
     def check_constraints(self, i, j, pos):
-        dist = torch.norm(pos[j] - pos[i])
-        if not (self.min_dist <= dist <= self.max_dist):
+        if torch.norm(pos[j] - pos[i]) > self.max_dist:
             return False
 
         i_bonded = self.bonds[i][self.bonds[i] != torch.inf]
@@ -68,17 +65,13 @@ class Bonds:
 
         # Handle units with one bond
         if has_one_bond.any():
-            dist = torch.norm(
+            final_mask[has_one_bond] = torch.norm(
                 (
                     pos[has_one_bond] -
                     pos[self.bonds[has_one_bond].min(dim = 1).values.long()]
                 ),
                 dim = 1
-            )
-            final_mask[has_one_bond] = (
-                (dist >= self.min_dist) &
-                (dist <= self.max_dist)
-            )
+            ) <= self.max_dist
 
         # Handle units within a double-bond
         if has_two_bonds.any():
@@ -90,12 +83,7 @@ class Bonds:
             dist2 = torch.norm(vec2, dim = 1)
 
             # Distance check
-            valid_dist = (
-                (dist1 >= self.min_dist) &
-                (dist1 <= self.max_dist) &
-                (dist2 >= self.min_dist) &
-                (dist2 <= self.max_dist)
-            )
+            valid_dist = (dist1 <= self.max_dist) & (dist2 <= self.max_dist)
 
             # Normalize vectors
             vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
@@ -435,13 +423,12 @@ class Things:
 
     def background_repulsion(self):
         mask = self.monad_mask | self.structure_mask
-        numerator = self.diffs[mask][:, mask]
-        denominator = (self.distances[mask][:, mask] + epsilon).unsqueeze(2)
-        unit_vectors = numerator / denominator
         self.movement_tensor[mask] -= (
+            self.diffs[mask][:, mask] /
+            (self.distances[mask][:, mask] + epsilon).unsqueeze(2) *
             (15 - self.distances[mask][:, mask]).clamp(
                 0, SYSTEM_HEAT
-            ).unsqueeze(2) * unit_vectors
+            ).unsqueeze(2)
         ).sum(dim = 1)
 
     def final_action(self, grid):
@@ -482,8 +469,11 @@ class Things:
 
         # Self-induced divison
         if self.monad_mask.any():
-            for i in (neural_action[:, 2] > torch.rand(self.Pop)).nonzero():
+            fission = neural_action[:, 2] > torch.rand(self.Pop)
+            for i in fission.nonzero():
                 self.monad_division(i.item())
+            if fission.any():
+                _, self.distances, self.diffs = vicinity(self.positions)
 
         # Calculate background repulsion and apply movements
         self.background_repulsion()
@@ -494,21 +484,32 @@ class Things:
 
     def update_positions(self):
         # Apply movement tensor
-        self.positions += self.movement_tensor
-        self.positions = torch.stack(
+        provisional_positions = self.positions + self.movement_tensor
+        provisional_positions = torch.stack(
             [
                 torch.clamp(
-                    self.positions[:, 0],
+                    provisional_positions[:, 0],
                     min = self.sizes,
                     max = SIMUL_WIDTH - self.sizes
                 ),
                 torch.clamp(
-                    self.positions[:, 1],
+                    provisional_positions[:, 1],
                     min = self.sizes,
                     max = SIMUL_HEIGHT - self.sizes
                 )
             ],
             dim = 1
+        )
+        self.positions[~self.structure_mask] = provisional_positions[
+            ~self.structure_mask
+        ]
+        apply_mask = self.bonds.validate(
+            provisional_positions[self.structure_mask]
+        ).unsqueeze(1)
+        self.positions[self.structure_mask] = torch.where(
+            apply_mask,
+            provisional_positions[self.structure_mask],
+            self.positions[self.structure_mask]
         )
         _, self.distances, self.diffs = vicinity(self.positions)
 
