@@ -421,14 +421,38 @@ class Things:
         self.energies -= torch.norm(movements, dim = 1)
         return movements
 
-    def background_repulsion(self):
-        mask = self.monad_mask | self.structure_mask
-        self.movement_tensor[mask] -= (
-            self.diffs[mask][:, mask] /
-            (self.distances[mask][:, mask] + epsilon).unsqueeze(2) *
-            (15 - self.distances[mask][:, mask]).clamp(
-                0, SYSTEM_HEAT
-            ).unsqueeze(2)
+    def background_repulsion(self, radius = 15.):
+        self.moving_mask = self.monad_mask | self.structure_mask
+        self.movement_tensor[self.moving_mask] -= (
+            self.diffs[self.moving_mask][:, self.moving_mask] /
+            (
+                self.distances[self.moving_mask][:, self.moving_mask] + epsilon
+            ).unsqueeze(2) *
+            (
+                radius - self.distances[self.moving_mask][:, self.moving_mask]
+            ).clamp(0, radius).unsqueeze(2)
+        ).sum(dim = 1)
+
+    def bond_repulsion(self):
+        valid_bonds = self.bonds.bonds != torch.inf
+        bond_pairs = valid_bonds.nonzero()
+        if len(bond_pairs) == 0:
+            return
+        start_pos = self.positions[self.structure_mask][bond_pairs[:, 0]]
+        end_pos = self.positions[self.structure_mask][bonds[valid_bonds].long()]
+        bond_centers = (start_pos + end_pos) / 2
+        half_lengths = torch.norm(end_pos - start_pos, dim = 1) / 2
+        moving_positions = self.positions[self.moving_mask]
+        _, distances, diffs = vicinity(moving_positions, radius = 30,
+                                       target_positions = bond_centers)
+        expanded_half_lengths = half_lengths.unsqueeze(0).expand(
+            len(moving_positions), -1
+        )
+        self.movement_tensor[self.moving_mask] -= (
+            diffs / (distances + epsilon).unsqueeze(2) *
+            (
+                expanded_half_lengths - distances
+            ).clamp(0, expanded_half_lengths).unsqueeze(2)
         ).sum(dim = 1)
 
     def final_action(self, grid):
@@ -475,8 +499,9 @@ class Things:
             if fission.any():
                 _, self.distances, self.diffs = vicinity(self.positions)
 
-        # Calculate background repulsion and apply movements
+        # Calculate final forces and apply movements
         self.background_repulsion()
+        self.bond_repulsion()
         self.update_positions()
 
         # Update total monad energy
