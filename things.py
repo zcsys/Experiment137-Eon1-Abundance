@@ -221,7 +221,7 @@ class Things:
                         :, self.energy_mask
                     ] ** 2 + epsilon
                 ).unsqueeze(2)
-            ).sum(dim = 1) * 6.
+            ).sum(dim = 1)
         else:
             col1 = torch.zeros((self.Pop, 2))
 
@@ -235,7 +235,7 @@ class Things:
                         :, self.monad_mask
                     ] ** 2 + epsilon
                 ).unsqueeze(2)
-            ).sum(dim = 1) * 10.
+            ).sum(dim = 1)
         else:
             col2 = torch.zeros((self.Pop, 2))
 
@@ -279,7 +279,7 @@ class Things:
                         self.structure_indices
                     ) ** 2 + epsilon
                 ).unsqueeze(2)
-            ).view(self.Pop, 12) * 8.
+            ).view(self.Pop, 12)
         else:
             col5 = torch.zeros((self.Pop, 12), dtype = torch.float32)
 
@@ -358,7 +358,7 @@ class Things:
                 unit_vectors /
                 denominator
             ).unsqueeze(3)
-        ) * 8.
+        )
 
         self.str_manipulations.scatter_add_(
             0,
@@ -383,7 +383,7 @@ class Things:
                 neural_action[:, 6:12].unsqueeze(2) *
                 perpendicular
             ) / denominator
-        ) * 8.
+        )
 
         # Reduce energies
         self.energies -= (
