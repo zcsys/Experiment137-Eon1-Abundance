@@ -96,39 +96,3 @@ def angle(pos0, pos1, pos2):
     vec2 /= torch.norm(vec2)
 
     return torch.acos(torch.dot(vec1, vec2))
-
-def check_intersections(movements, bond_pos):
-    """
-    Check intersections between movement vectors and bonds in batch
-
-    Args:
-        movements: tensor of shape (N, 2, 2) containing start and end points
-        bond_starts: tensor of shape (M, 2) containing bond start positions
-        bond_ends: tensor of shape (M, 2) containing bond end positions
-
-    Returns:
-        tensor of shape (N) containing True for movements that intersect any
-        bond
-    """
-    def orientation(p, q, r):
-        val = (q[..., 1] - p[..., 1]) * (r[..., 0] - q[..., 0]) - \
-              (q[..., 0] - p[..., 0]) * (r[..., 1] - q[..., 1])
-        return torch.where(
-            val == 0,
-            torch.zeros_like(val),
-            torch.where(
-                val > 0,
-                torch.ones_like(val),
-                2 * torch.ones_like(val)
-            )
-        )
-
-    p1, p2 = movements[:, 0], movements[:, 1]
-    p3, p4 = bond_pos[:, 0], bond_pos[:, 1]
-
-    o1 = orientation(p1, p2, p3)
-    o2 = orientation(p1, p2, p4)
-    o3 = orientation(p3, p4, p1)
-    o4 = orientation(p3, p4, p2)
-
-    return (o1 != o2) & (o3 != o4)

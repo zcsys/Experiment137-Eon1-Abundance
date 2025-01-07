@@ -439,9 +439,12 @@ class Things:
         if len(bond_pairs) == 0:
             return
         start_pos = self.positions[self.structure_mask][bond_pairs[:, 0]]
-        end_pos = self.positions[self.structure_mask][bonds[valid_bonds].long()]
+        end_pos = self.positions[
+            self.structure_mask
+        ][self.bonds.bonds[valid_bonds].long()]
         bond_centers = (start_pos + end_pos) / 2
-        half_lengths = torch.norm(end_pos - start_pos, dim = 1) / 2
+        half_lengths = torch.norm(end_pos - start_pos, dim = 1) / 2 - \
+                       THING_TYPES["structuralUnit"]["size"]
         moving_positions = self.positions[self.moving_mask]
         _, distances, diffs = vicinity(moving_positions, radius = 30,
                                        target_positions = bond_centers)
@@ -452,7 +455,7 @@ class Things:
             diffs / (distances + epsilon).unsqueeze(2) *
             (
                 expanded_half_lengths - distances
-            ).clamp(0, expanded_half_lengths).unsqueeze(2)
+            ).clamp(torch.tensor(0.), expanded_half_lengths).unsqueeze(2)
         ).sum(dim = 1)
 
     def final_action(self, grid):
