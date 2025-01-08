@@ -10,38 +10,57 @@ from simulation import draw_dashed_circle
 from diffusion import Grid
 
 class Bonds:
-    def __init__(self, StrPop, valence = 2, min_angle = 120, max_dist = 50):
+    def __init__(self, StrPop, valence = 3, min_angle = 120, max_dist = 50):
         self.StrPop = StrPop
         self.valence = valence
         self.min_angle = min_angle * math.pi / 180
         self.max_dist = max_dist
         self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
 
-    def get_first_available_slot(self, i):
-        available_slots = torch.where(self.bonds[i] == torch.inf)[0]
+    def get_first_available_slot_str(self, i):
+        available_slots = torch.where(self.bonds[i][:2] == torch.inf)[0]
         return available_slots[0].item() if len(available_slots) > 0 else None
 
-    def form_bond(self, i, j, positions):
+    def get_first_available_slot_mnd(self, i):
+        available_slots = torch.where(self.bonds[i][2:] == torch.inf)[0]
+        return available_slots[0].item() if len(available_slots) > 0 else None
+
+    def form_str_bond(self, i, j, positions):
         if i == j or (self.bonds[i] == j).any() or (self.bonds[j] == i).any():
             return
 
-        i_slot = self.get_first_available_slot(i)
-        j_slot = self.get_first_available_slot(j)
+        i_slot = self.get_first_available_slot_str(i)
+        j_slot = self.get_first_available_slot_str(j)
 
         if (i_slot is not None and j_slot is not None and
-            self.check_constraints(i, j, positions)):
+            self.check_constraints_for_str_bond(i, j, positions)):
             self.bonds[i][i_slot] = j
             self.bonds[j][j_slot] = i
 
-    def break_bond(self, i, j):
+    def form_mnd_bond(self, i, j, str_positions, mnd_position):
+        if (self.bonds[i][2:] == j).any():
+            return
+        slot = self.get_first_available_slot_mnd(i)
+        if (slot is not None and
+            self.check_constraints_for_mnd_bond(i, j, positions)):
+            self.bonds[i][slot] = j
+
+    def break_str_bond(self, i, j):
         i_slot = torch.where(self.bonds[i] == j)[0]
         j_slot = torch.where(self.bonds[j] == i)[0]
 
-        if len(i_slot) > 0:
+        if (len(i_slot) > 0 and
+            (self.bonds[i][2:] == torch.inf).all() and
+            (self.bonds[j][2:] == torch.inf).all()):
             self.bonds[i][i_slot] = torch.inf
             self.bonds[j][j_slot] = torch.inf
 
-    def check_constraints(self, i, j, pos):
+    def break_mnd_bond(self, i, j):
+        slot = torch.where(self.bonds[i, 2:] == j)[0]
+        if len(slot) > 0:
+            self.bonds[i][slot] = torch.inf
+
+    def check_constraints_for_str_bond(self, i, j, pos):
         if torch.norm(pos[j] - pos[i]) > self.max_dist:
             return False
 
@@ -57,49 +76,10 @@ class Bonds:
 
         return True
 
-    def validate(self, pos):
-        # Create masks
-        has_two_bonds = (self.bonds != torch.inf).sum(dim = 1) == 2
-        has_one_bond = (self.bonds != torch.inf).sum(dim = 1) == 1
-        final_mask = torch.ones(self.StrPop, dtype = torch.bool)
-
-        # Handle units with one bond
-        if has_one_bond.any():
-            final_mask[has_one_bond] = torch.norm(
-                (
-                    pos[has_one_bond] -
-                    pos[self.bonds[has_one_bond].min(dim = 1).values.long()]
-                ),
-                dim = 1
-            ) <= self.max_dist
-
-        # Handle units within a double-bond
-        if has_two_bonds.any():
-            # Calculate vectors and distances
-            unit_pos = pos[has_two_bonds]
-            vec1 = pos[self.bonds[has_two_bonds][:, 0].long()] - unit_pos
-            vec2 = pos[self.bonds[has_two_bonds][:, 1].long()] - unit_pos
-            dist1 = torch.norm(vec1, dim = 1)
-            dist2 = torch.norm(vec2, dim = 1)
-
-            # Distance check
-            valid_dist = (dist1 <= self.max_dist) & (dist2 <= self.max_dist)
-
-            # Normalize vectors
-            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
-            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
-
-            # Angle check
-            angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
-            valid_angle = angles >= self.min_angle
-
-            # Update final mask
-            final_mask[has_two_bonds] = valid_angle & valid_dist
-            final_mask[
-                self.bonds[has_two_bonds][~valid_angle].view(-1).long()
-            ] = False
-
-        return final_mask
+    def check_constraints_for_mnd_bond(self, i, str_positions, mnd_position):
+        if ((self.bonds[i][:2] == torch.inf).any() or
+            torch.norm(str_positions[i] - mnd_position) > self.max_dist):
+            return False
 
 class Things:
     def __init__(self, thing_types = None, state_file = None):
@@ -351,8 +331,8 @@ class Things:
             (
                 unit_vectors /
                 denominator
-            ).unsqueeze(3) * STD_RADIUS
-        )
+            ).unsqueeze(3)
+        ) * STD_RADIUS
 
         self.str_manipulations.scatter_add_(
             0,
@@ -444,18 +424,24 @@ class Things:
             ).clamp(0, radius).unsqueeze(2)
         ).sum(dim = 1)
 
-    def bond_repulsion(self):
+    def bond_adjustment(self):
+        # Get indices
         valid_bonds = self.bonds.bonds != torch.inf
         bond_pairs = valid_bonds.nonzero()
         if len(bond_pairs) == 0:
             return
-        start_pos = self.positions[self.structure_mask][bond_pairs[:, 0]]
-        end_pos = self.positions[
-            self.structure_mask
-        ][self.bonds.bonds[valid_bonds].long()]
+        bonded_idx = bond_pairs[:, 0]
+        bonders_idx = self.bonds.bonds[valid_bonds].long()
+        pos = self.positions[self.structure_mask]
+
+        # Get positions
+        start_pos = pos[bonded_idx]
+        end_pos = pos[bonders_idx]
         bond_centers = (start_pos + end_pos) / 2
-        half_lengths = torch.norm(end_pos - start_pos, dim = 1) / 2 - \
-                       THING_TYPES["structuralUnit"]["size"]
+        current_lengths = torch.norm(end_pos - start_pos, dim = 1)
+        half_lengths = current_lengths / 2
+
+        # Bond repulsion
         moving_positions = self.positions[self.moving_mask]
         _, distances, diffs = vicinity(moving_positions, radius = 30,
                                        target_positions = bond_centers)
@@ -468,6 +454,40 @@ class Things:
                 expanded_half_lengths - distances
             ).clamp(torch.tensor(0.), expanded_half_lengths).unsqueeze(2)
         ).sum(dim = 1)
+
+        # Distance adjustment
+        target_radius = 20
+        direction_vectors = (end_pos - start_pos) / \
+                            (current_lengths.unsqueeze(1) + epsilon)
+        apply_mask = (half_lengths > target_radius).unsqueeze(1)
+        full_indices = self.structure_mask.nonzero().expand(-1, 2)
+        self.movement_tensor.scatter_add_(
+            0,
+            full_indices[bonded_idx],
+            direction_vectors * apply_mask
+        )
+
+        # Angle adjustment
+        has_two_bonds = (valid_bonds.sum(dim = 1) == 2)
+        if has_two_bonds.any():
+            unit_str_idx = has_two_bonds.nonzero().squeeze(1)
+            unit_pos = self.positions[self.structure_mask][has_two_bonds]
+            vec1 = pos[self.bonds.bonds[has_two_bonds][:, 0].long()] - unit_pos
+            vec2 = pos[self.bonds.bonds[has_two_bonds][:, 1].long()] - unit_pos
+            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
+            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
+            angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
+            angles_to_adjust = angles < self.bonds.min_angle
+
+            bisectors = (vec1 + vec2)[angles_to_adjust]
+            bisectors /= torch.norm(bisectors, dim = 1, keepdim = True) + \
+                         epsilon
+            self.movement_tensor.scatter_add_(
+                0,
+                full_indices[unit_str_idx][angles_to_adjust],
+                bisectors * 5.
+            )
+
 
     def final_action(self, grid):
         # Update sensory inputs
@@ -515,7 +535,7 @@ class Things:
 
         # Calculate final forces and apply movements
         self.background_repulsion()
-        self.bond_repulsion()
+        self.bond_adjustment()
         self.update_positions()
 
         # Update total monad energy
@@ -523,32 +543,21 @@ class Things:
 
     def update_positions(self):
         # Apply movement tensor
-        provisional_positions = self.positions + self.movement_tensor
-        provisional_positions = torch.stack(
+        self.positions = self.positions + self.movement_tensor
+        self.positions = torch.stack(
             [
                 torch.clamp(
-                    provisional_positions[:, 0],
+                    self.positions[:, 0],
                     min = self.sizes,
                     max = SIMUL_WIDTH - self.sizes
                 ),
                 torch.clamp(
-                    provisional_positions[:, 1],
+                    self.positions[:, 1],
                     min = self.sizes,
                     max = SIMUL_HEIGHT - self.sizes
                 )
             ],
             dim = 1
-        )
-        self.positions[~self.structure_mask] = provisional_positions[
-            ~self.structure_mask
-        ]
-        apply_mask = self.bonds.validate(
-            provisional_positions[self.structure_mask]
-        ).unsqueeze(1)
-        self.positions[self.structure_mask] = torch.where(
-            apply_mask,
-            provisional_positions[self.structure_mask],
-            self.positions[self.structure_mask]
         )
         _, self.distances, self.diffs = vicinity(self.positions)
 
@@ -566,7 +575,7 @@ class Things:
             self.energies.scatter_add_(
                 0,
                 monad_idx,
-                UNIT_ENERGY.expand_as(monad_idx)
+                torch.tensor(UNIT_ENERGY).expand_as(monad_idx)
             )
             energy_idx_general = torch.where(self.energy_mask)[0][energy_idx]
             self.remove_energyUnits(unique(energy_idx_general.tolist()))
@@ -884,11 +893,11 @@ class Things:
         # Draw bonds
         if self.structure_mask.any():
             struct_positions = self.positions[self.structure_mask]
-            struct_indices = torch.nonzero(self.structure_mask).squeeze(1)
+            struct_indices = torch.where(self.structure_mask)[0]
 
             if hasattr(self.bonds, 'bonds'):
                 for i in range(len(self.bonds.bonds)):
-                    for j, bonded_idx in enumerate(self.bonds.bonds[i]):
+                    for j, bonded_idx in enumerate(self.bonds.bonds[i, :2]):
                         if bonded_idx == torch.inf:
                             continue
                         if i < bonded_idx:

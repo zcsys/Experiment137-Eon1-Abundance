@@ -75,7 +75,7 @@ def Rules(simul, n):
 
             # Attempt to form bonds for valid pairs
             for i, j in valid_pairs:
-                simul.things.bonds.form_bond(
+                simul.things.bonds.form_str_bond(
                     i, j, simul.things.positions[struct_mask]
                 )
 
@@ -91,6 +91,6 @@ def Rules(simul, n):
 
                     # Breaking probability increases as distance approaches max
                     if dist > 40:
-                        break_prob = 0.00001 * (dist - 40)
+                        break_prob = 0.001 * (dist - 40)
                         if break_prob_matrix[i, j] < break_prob:
-                            simul.things.bonds.break_bond(i, bonded_idx)
+                            simul.things.bonds.break_str_bond(i, bonded_idx)

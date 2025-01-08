@@ -16,7 +16,7 @@ def unique(x):
 
 def add_positions(N = 1,
                   existing_positions = torch.empty((0, 2)),
-                  min_dist = 10.,
+                  min_dist = STD_RADIUS,
                   width = SIMUL_WIDTH,
                   height = SIMUL_HEIGHT):
     positions = existing_positions
