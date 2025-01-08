@@ -209,7 +209,7 @@ class Things:
                         :, self.energy_mask
                     ] ** 2 + epsilon
                 ).unsqueeze(2)
-            ).sum(dim = 1)
+            ).sum(dim = 1) * STD_RADIUS
         else:
             col1 = torch.zeros((self.Pop, 2))
 
@@ -223,7 +223,7 @@ class Things:
                         :, self.monad_mask
                     ] ** 2 + epsilon
                 ).unsqueeze(2)
-            ).sum(dim = 1)
+            ).sum(dim = 1) * STD_RADIUS
         else:
             col2 = torch.zeros((self.Pop, 2))
 
@@ -267,7 +267,7 @@ class Things:
                         self.structure_indices
                     ) ** 2 + epsilon
                 ).unsqueeze(2)
-            ).view(self.Pop, 12)
+            ).view(self.Pop, 12) * STD_RADIUS
         else:
             col5 = torch.zeros((self.Pop, 12), dtype = torch.float32)
 
@@ -351,7 +351,7 @@ class Things:
             (
                 unit_vectors /
                 denominator
-            ).unsqueeze(3)
+            ).unsqueeze(3) * STD_RADIUS
         )
 
         self.str_manipulations.scatter_add_(
@@ -377,7 +377,7 @@ class Things:
                 neural_action[:, 6:12].unsqueeze(2) *
                 perpendicular
             ) / denominator
-        )
+        ) * STD_RADIUS
 
         # Reduce energies
         self.energies -= (
@@ -421,7 +421,7 @@ class Things:
         self.energies -= torch.norm(movements, dim = 1)
         return movements
 
-    def background_repulsion(self, radius = 15.):
+    def background_repulsion(self, radius = STD_RADIUS):
         self.moving_mask = self.monad_mask | self.structure_mask
         self.movement_tensor[self.moving_mask] -= (
             self.diffs[self.moving_mask][:, self.moving_mask] /
@@ -430,6 +430,17 @@ class Things:
             ).unsqueeze(2) *
             (
                 radius - self.distances[self.moving_mask][:, self.moving_mask]
+            ).clamp(0, radius).unsqueeze(2)
+        ).sum(dim = 1)
+        self.movement_tensor[self.energy_mask] -= (
+            self.diffs[self.energy_mask][:, self.structure_mask] /
+            (
+                self.distances[self.energy_mask][:, self.structure_mask] +
+                epsilon
+            ).unsqueeze(2) *
+            (
+                radius -
+                self.distances[self.energy_mask][:, self.structure_mask]
             ).clamp(0, radius).unsqueeze(2)
         ).sum(dim = 1)
 
