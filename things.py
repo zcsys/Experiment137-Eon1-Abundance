@@ -42,23 +42,21 @@ class Bonds:
             return
         slot = self.get_first_available_slot_mnd(i)
         if (slot is not None and
-            self.check_constraints_for_mnd_bond(i, j, positions)):
+            self.check_constraints_for_mnd_bond(i, str_positions,
+                                                mnd_position)):
             self.bonds[i][slot] = j
 
     def break_str_bond(self, i, j):
         i_slot = torch.where(self.bonds[i] == j)[0]
         j_slot = torch.where(self.bonds[j] == i)[0]
-
-        if (len(i_slot) > 0 and
-            (self.bonds[i][2:] == torch.inf).all() and
-            (self.bonds[j][2:] == torch.inf).all()):
+        if len(i_slot) > 0:
             self.bonds[i][i_slot] = torch.inf
             self.bonds[j][j_slot] = torch.inf
+            self.bonds[i, 2:] = torch.inf
+            self.bonds[j, 2:] = torch.inf
 
     def break_mnd_bond(self, i, j):
-        slot = torch.where(self.bonds[i, 2:] == j)[0]
-        if len(slot) > 0:
-            self.bonds[i][slot] = torch.inf
+        self.bonds[i, j + 2] = torch.inf
 
     def check_constraints_for_str_bond(self, i, j, pos):
         if torch.norm(pos[j] - pos[i]) > self.max_dist:
@@ -80,6 +78,8 @@ class Bonds:
         if ((self.bonds[i][:2] == torch.inf).any() or
             torch.norm(str_positions[i] - mnd_position) > self.max_dist):
             return False
+
+        return True
 
 class Things:
     def __init__(self, thing_types = None, state_file = None):
@@ -134,12 +134,13 @@ class Things:
         )
         self.distances = None
         self.bonds = torch.empty(0)
+        self.bond_sites = torch.zeros((self.Pop,), dtype = torch.float32)
 
         # Initialize genomes and lineages
         self.genomes = torch.cat(
             (
                 torch.zeros((self.Pop, 12), dtype = torch.float32),
-                initialize_parameters(self.Pop, 52, 45, "nn23")
+                initialize_parameters(self.Pop, 52, 46, "nn23")
             ),
             dim = 1
         )
@@ -157,9 +158,9 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1XC813 neurogenetics"""
+        """Monad1XC814 neurogenetics"""
         self.elemental_biases = torch.tanh(self.genomes[:, :12])
-        self.nn = nn23(self.genomes[:, 12:], 52, 45)
+        self.nn = nn23(self.genomes[:, 12:], 52, 46)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
         mutation_mask = torch.rand_like(self.genomes[i]) < probability
@@ -426,12 +427,13 @@ class Things:
 
     def bond_adjustment(self):
         # Get indices
-        valid_bonds = self.bonds.bonds != torch.inf
+        str_bonds = self.bonds.bonds[:, :2]
+        valid_bonds = str_bonds != torch.inf
         bond_pairs = valid_bonds.nonzero()
         if len(bond_pairs) == 0:
             return
         bonded_idx = bond_pairs[:, 0]
-        bonders_idx = self.bonds.bonds[valid_bonds].long()
+        bonders_idx = str_bonds[valid_bonds].long()
         pos = self.positions[self.structure_mask]
 
         # Get positions
@@ -471,9 +473,9 @@ class Things:
         has_two_bonds = (valid_bonds.sum(dim = 1) == 2)
         if has_two_bonds.any():
             unit_str_idx = has_two_bonds.nonzero().squeeze(1)
-            unit_pos = self.positions[self.structure_mask][has_two_bonds]
-            vec1 = pos[self.bonds.bonds[has_two_bonds][:, 0].long()] - unit_pos
-            vec2 = pos[self.bonds.bonds[has_two_bonds][:, 1].long()] - unit_pos
+            unit_pos = pos[has_two_bonds]
+            vec1 = pos[str_bonds[has_two_bonds][:, 0].long()] - unit_pos
+            vec2 = pos[str_bonds[has_two_bonds][:, 1].long()] - unit_pos
             vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
             vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
             angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
@@ -487,7 +489,6 @@ class Things:
                 full_indices[unit_str_idx][angles_to_adjust],
                 bisectors * 5.
             )
-
 
     def final_action(self, grid):
         # Update sensory inputs
@@ -507,6 +508,7 @@ class Things:
                 neural_action[:, :2]
             )
             self.memory = neural_action[:, 33:45]
+            self.bond_sites = neural_action[:, 45]
 
         # Fetch energyUnit movements
         if self.energy_mask.any():
@@ -660,6 +662,13 @@ class Things:
             ),
             dim = 0
         )
+        self.bond_sites = torch.cat(
+            (
+                self.bond_sites,
+                torch.tensor([0.])
+            ),
+            dim = 0
+        )
         self.movement_tensor = torch.cat(
             (
                 self.movement_tensor,
@@ -732,6 +741,7 @@ class Things:
             self.memory = remove_element(self.memory, i)
             self.Rotation = remove_element(self.Rotation, i)
             self.U = remove_element(self.U, i)
+            self.bond_sites = remove_element(self.bond_sites, i)
             del self.lineages[i]
 
             # Get general index to remove universal attributes
@@ -966,7 +976,8 @@ class Things:
             'colors': self.colors,
             'memory': self.memory.tolist(),
             'Rotation': self.Rotation.tolist(),
-            'bonds': self.bonds.bonds.tolist()
+            'bonds': self.bonds.bonds.tolist(),
+            'bond_sites': self.bond_sites.tolist()
         }
 
     def load_state(self, state_file):
@@ -1017,6 +1028,7 @@ class Things:
         self.distances = None
         self.initialize_bonds()
         self.bonds.bonds = torch.tensor(state['bonds'])
+        self.bond_sites = torch.tensor(state['bond_sites'])
 
     def add_structuralUnits(self, POP_STR = 1):
         self.thing_types += ["structuralUnit" for _ in range(POP_STR)]

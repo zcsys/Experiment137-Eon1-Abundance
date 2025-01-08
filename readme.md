@@ -117,7 +117,7 @@
 * nn23: Simple feed-forward network with 3 hidden layers (the first 2 with ReLU
 				and the 3rd with leaky RelU) of 8x, 4x, and 2x the input size, finally
 				transformed into the output layer with tanh
-* Monad1XC813
+* Monad1XC814
 	* Sensory inputs - 40 neurons
 		* Elemental bias: 12 tanh(float32)
 		* Compass: 2 neurons [-1, 1]
@@ -127,10 +127,11 @@
 		* Gradient sensors: 3 x 2 neurons [-1, 1]
 		* Structural unit sensors: 6 x 2 neurons [-1, 1]
 		* Energy: 1 neuron [0, 1]
-	* Action organs - 33 neurons
+	* Action organs - 34 neurons
 		* Movement: 2 neurons [-1, 1]
 		* Division: 1 neuron [-1, 1]
 		* Structural unit reaction manipulation: 6 x 5 neurons [-1, 1]
+		* Bond site: 1 neuron [-1, 1]
 	* Memory - 12 tanh(float32)
 	* Neural net - nn23 with 728 hidden neurons (135k parameters)
 

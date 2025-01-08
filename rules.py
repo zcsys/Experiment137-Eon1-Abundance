@@ -67,10 +67,8 @@ def Rules(simul, n):
 
             # Find pairs for bond formation that meet criteria
             valid_pairs = torch.nonzero(
-                (str_distances >= 10) &  # min_dist
-                (str_distances <= 50) &  # max_dist
-                (form_prob_matrix < 0.01) &  # probability threshold
-                (str_distances > 0)  # exclude self-bonds
+                (str_distances >= 10) & (str_distances <= 50) &
+                (form_prob_matrix < 0.01)
             )
 
             # Attempt to form bonds for valid pairs
@@ -94,3 +92,62 @@ def Rules(simul, n):
                         break_prob = 0.001 * (dist - 40)
                         if break_prob_matrix[i, j] < break_prob:
                             simul.things.bonds.break_str_bond(i, bonded_idx)
+
+            # Handle monad bonds if there are monads
+            if simul.things.monad_mask.any():
+                str_positions = simul.things.positions[struct_mask]
+                mnd_positions = simul.things.positions[simul.things.monad_mask]
+                mnd_str_distances = simul.things.distances[
+                    simul.things.monad_mask
+                ][:, struct_mask]
+
+                # Form new monad bonds
+                active_bond_sites = simul.things.bond_sites > 0
+                for mnd_idx in active_bond_sites.nonzero():
+                    mnd_idx = mnd_idx.item()
+
+                    # Find eligible structural units within range
+                    valid_dists = mnd_str_distances[mnd_idx]
+                    valid_mask = (valid_dists >= 10) & (valid_dists <= 50)
+
+                    # Only try to bond if there are valid candidates
+                    if valid_mask.any():
+                        # Calculate bonding probabilities
+                        eligible_mask = (
+                            torch.rand(len(valid_mask)) <
+                            simul.things.bond_sites[mnd_idx]
+                        ) & valid_mask
+
+                        if eligible_mask.any():
+                            # Try to bond with closest eligible unit
+                            valid_dists[~eligible_mask] = torch.inf
+                            closest_str_idx = valid_dists.argmin().item()
+
+                            simul.things.bonds.form_mnd_bond(
+                                closest_str_idx,
+                                mnd_idx,
+                                str_positions,
+                                mnd_positions[mnd_idx]
+                            )
+
+                # Check existing monad bonds for breaking
+                for str_idx in range(len(str_positions)):
+                    mnd_bond = simul.things.bonds.bonds[str_idx, 2]
+                    if mnd_bond != torch.inf:
+                        mnd_idx = mnd_bond.long()
+                        dist = torch.norm(str_positions[str_idx] -
+                                          mnd_positions[mnd_idx])
+
+                        # Break if:
+                        # 1. Distance too large
+                        # 2. Bond site inactive
+                        # 3. Random break probability
+                        should_break = (
+                            dist > 50 or
+                            simul.things.bond_sites[mnd_idx] <= 0 or
+                            (dist > 40 and
+                             torch.rand(1) < 0.001 * (dist - 40))
+                        )
+
+                        if should_break:
+                            simul.things.bonds.break_mnd_bond(str_idx, 0)
