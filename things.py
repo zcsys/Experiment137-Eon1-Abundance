@@ -492,6 +492,34 @@ class Things:
                 bisectors * 5.
             )
 
+        # Handle monad bonds
+        mnd_bonds = self.bonds.bonds[:, 2:]
+        valid_bonds = mnd_bonds != torch.inf
+        bond_pairs = valid_bonds.nonzero()
+        if len(bond_pairs) == 0:
+            return
+        bonded_idx = bond_pairs[:, 0]
+        bonders_idx = torch.where(
+            (
+                self.universal_monad_identifier.unsqueeze(1) ==
+                mnd_bonds[valid_bonds].unsqueeze(0)
+            )
+        )[1].long()
+        start_pos = pos[bonded_idx]
+        end_pos = self.positions[self.monad_mask][bonders_idx]
+        bond_centers = (start_pos + end_pos) / 2
+        current_lengths = torch.norm(end_pos - start_pos, dim = 1)
+        half_lengths = current_lengths / 2
+        direction_vectors = (end_pos - start_pos) / \
+                            (current_lengths.unsqueeze(1) + epsilon)
+        apply_mask = (half_lengths > target_radius).unsqueeze(1)
+        full_indices = self.monad_mask.nonzero().expand(-1, 2)
+        self.movement_tensor.scatter_add_(
+            0,
+            full_indices[bonders_idx],
+            torch.where(apply_mask, direction_vectors, -direction_vectors)
+        )
+
     def final_action(self, grid):
         # Update sensory inputs
         self.sensory_inputs(grid)
