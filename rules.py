@@ -78,9 +78,9 @@ def Rules(simul, n):
                 )
 
             # Check existing bonds for breaking
-            bonds = simul.things.bonds.bonds
-            for i in range(len(bonds)):
-                for j, bonded_idx in enumerate(bonds[i]):
+            str_bonds = simul.things.bonds.bonds[:, :2]
+            for i in range(len(str_bonds)):
+                for j, bonded_idx in enumerate(str_bonds[i]):
                     if bonded_idx == torch.inf:
                         continue
 
@@ -125,7 +125,9 @@ def Rules(simul, n):
 
                             simul.things.bonds.form_mnd_bond(
                                 closest_str_idx,
-                                mnd_idx,
+                                simul.things.universal_monad_identifier[
+                                    mnd_idx
+                                ],
                                 str_positions,
                                 mnd_positions[mnd_idx]
                             )
@@ -134,7 +136,9 @@ def Rules(simul, n):
                 for str_idx in range(len(str_positions)):
                     mnd_bond = simul.things.bonds.bonds[str_idx, 2]
                     if mnd_bond != torch.inf:
-                        mnd_idx = mnd_bond.long()
+                        mnd_idx = torch.where(
+                            simul.things.universal_monad_identifier == mnd_bond
+                        )[0][0].long()
                         dist = torch.norm(str_positions[str_idx] -
                                           mnd_positions[mnd_idx])
 

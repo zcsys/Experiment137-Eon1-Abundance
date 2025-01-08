@@ -44,7 +44,7 @@ class Bonds:
         if (slot is not None and
             self.check_constraints_for_mnd_bond(i, str_positions,
                                                 mnd_position)):
-            self.bonds[i][slot] = j
+            self.bonds[i][slot + 2] = j
 
     def break_str_bond(self, i, j):
         i_slot = torch.where(self.bonds[i] == j)[0]
@@ -135,6 +135,8 @@ class Things:
         self.distances = None
         self.bonds = torch.empty(0)
         self.bond_sites = torch.zeros((self.Pop,), dtype = torch.float32)
+        self.universal_monad_identifier = torch.arange(self.Pop)
+        self.total_number_of_all_monads = self.Pop
 
         # Initialize genomes and lineages
         self.genomes = torch.cat(
@@ -669,6 +671,13 @@ class Things:
             ),
             dim = 0
         )
+        self.universal_monad_identifier = torch.cat(
+            (
+                self.universal_monad_identifier,
+                torch.tensor([self.total_number_of_all_monads])
+            ),
+            dim = 0
+        )
         self.movement_tensor = torch.cat(
             (
                 self.movement_tensor,
@@ -706,6 +715,7 @@ class Things:
         )
         self.N += 1
         self.Pop += 1
+        self.total_number_of_all_monads += 1
 
         # Mutate the old genome & apply the new genome
         idx = self.from_general_to_monad_idx(i)
@@ -743,6 +753,17 @@ class Things:
             self.U = remove_element(self.U, i)
             self.bond_sites = remove_element(self.bond_sites, i)
             del self.lineages[i]
+
+            # Update bonds
+            universalID = self.universal_monad_identifier[i]
+            self.universal_monad_identifier = remove_element(
+                self.universal_monad_identifier, i
+            )
+            self.bonds.bonds[:, 2:] = torch.where(
+                self.bonds.bonds[:, 2:] == universalID,
+                torch.inf,
+                self.bonds.bonds[:, 2:]
+            )
 
             # Get general index to remove universal attributes
             idx = self.from_monad_to_general_idx(i)
@@ -927,6 +948,30 @@ class Things:
                                 1
                             )
 
+                    for j, bonded_idx in enumerate(self.bonds.bonds[i, 2:]):
+                        if bonded_idx == torch.inf:
+                            continue
+                        start_pos = struct_positions[i]
+                        end_pos = self.positions[self.monad_mask][
+                            torch.where(
+                                self.universal_monad_identifier ==
+                                bonded_idx
+                            )[0][0].long()
+                        ]
+                        pygame.draw.line(
+                            screen,
+                            colors["B"],
+                            (
+                                int(start_pos[0].item()),
+                                int(start_pos[1].item())
+                            ),
+                            (
+                                int(end_pos[0].item()),
+                                int(end_pos[1].item())
+                            ),
+                            1
+                        )
+
         for i, pos in enumerate(self.positions):
             thing_type = self.thing_types[i]
             thing_color = self.colors[i]
@@ -977,7 +1022,9 @@ class Things:
             'memory': self.memory.tolist(),
             'Rotation': self.Rotation.tolist(),
             'bonds': self.bonds.bonds.tolist(),
-            'bond_sites': self.bond_sites.tolist()
+            'bond_sites': self.bond_sites.tolist(),
+            'universalID': self.universal_monad_identifier.tolist(),
+            'universalN': self.total_number_of_all_monads
         }
 
     def load_state(self, state_file):
@@ -1004,6 +1051,8 @@ class Things:
             ),
             dim = 1
         )
+        self.universal_monad_identifier = torch.tensor(state['universalID'])
+        self.total_number_of_all_monads = state['universalN']
 
         self.monad_mask = torch.tensor(
             [thing_type == "monad" for thing_type in self.thing_types]
