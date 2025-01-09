@@ -16,7 +16,7 @@ def unique(x):
 
 def add_positions(N = 1,
                   existing_positions = torch.empty((0, 2)),
-                  min_dist = 10.,
+                  min_dist = STD_RADIUS,
                   width = SIMUL_WIDTH,
                   height = SIMUL_HEIGHT):
     positions = existing_positions
@@ -60,10 +60,10 @@ def flattened_identity_matrix(N, x = None):
 
 def vicinity(source_positions, radius = SIGHT, target_positions = None):
     source_tree = KDTree(source_positions.numpy())
-    if target_positions:
-        target_tree = KDTree(target_positions.numpy())
-    else:
+    if target_positions is None:
         target_tree, target_positions = source_tree, source_positions
+    else:
+        target_tree = KDTree(target_positions.numpy())
 
     distances = source_tree.sparse_distance_matrix(target_tree, radius, p = 2.0)
     rows, cols = distances.nonzero()
@@ -88,15 +88,11 @@ def decompose_vectors(X, U):
     perpendicular = torch.norm(X_reshaped - parallel * U, dim = 2)
     return torch.cat((parallel.squeeze(2), perpendicular), dim = 1)
 
-def decompose_vectors_better(X, R):
-    cos = torch.cos(R)
-    sin = torch.sin(R)
-    rotation_matrix = torch.stack(
-        (
-            torch.stack((cos, -sin), dim = 1),
-            torch.stack((sin, cos), dim = 1)
-        ),
-        dim = 1
-    ).unsqueeze(1)
-    N, total_dims = X.shape
-    return rotation_matrix @ X.view(N, total_dims // 2, 2)
+def angle(pos0, pos1, pos2):
+    vec1 = pos1 - pos0
+    vec2 = pos2 - pos0
+
+    vec1 /= torch.norm(vec1)
+    vec2 /= torch.norm(vec2)
+
+    return torch.acos(torch.dot(vec1, vec2))

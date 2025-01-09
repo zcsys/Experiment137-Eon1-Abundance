@@ -9,6 +9,78 @@ from nn import *
 from simulation import draw_dashed_circle
 from diffusion import Grid
 
+class Bonds:
+    def __init__(self, StrPop, valence = 3, min_angle = 120, max_dist = 50):
+        self.StrPop = StrPop
+        self.valence = valence
+        self.min_angle = min_angle * math.pi / 180
+        self.max_dist = max_dist
+        self.bonds = torch.tensor(torch.inf).repeat(self.StrPop, self.valence)
+
+    def get_first_available_slot_str(self, i):
+        available_slots = torch.where(self.bonds[i][:2] == torch.inf)[0]
+        return available_slots[0].item() if len(available_slots) > 0 else None
+
+    def get_first_available_slot_mnd(self, i):
+        available_slots = torch.where(self.bonds[i][2:] == torch.inf)[0]
+        return available_slots[0].item() if len(available_slots) > 0 else None
+
+    def form_str_bond(self, i, j, positions):
+        if i == j or (self.bonds[i] == j).any() or (self.bonds[j] == i).any():
+            return
+
+        i_slot = self.get_first_available_slot_str(i)
+        j_slot = self.get_first_available_slot_str(j)
+
+        if (i_slot is not None and j_slot is not None and
+            self.check_constraints_for_str_bond(i, j, positions)):
+            self.bonds[i][i_slot] = j
+            self.bonds[j][j_slot] = i
+
+    def form_mnd_bond(self, i, j, str_positions, mnd_position):
+        if (self.bonds[i][2:] == j).any():
+            return
+        slot = self.get_first_available_slot_mnd(i)
+        if (slot is not None and
+            self.check_constraints_for_mnd_bond(i, str_positions,
+                                                mnd_position)):
+            self.bonds[i][slot + 2] = j
+
+    def break_str_bond(self, i, j):
+        i_slot = torch.where(self.bonds[i] == j)[0]
+        j_slot = torch.where(self.bonds[j] == i)[0]
+        if len(i_slot) > 0:
+            self.bonds[i][i_slot] = torch.inf
+            self.bonds[j][j_slot] = torch.inf
+            self.bonds[i, 2:] = torch.inf
+            self.bonds[j, 2:] = torch.inf
+
+    def break_mnd_bond(self, i, j):
+        self.bonds[i, j + 2] = torch.inf
+
+    def check_constraints_for_str_bond(self, i, j, pos):
+        if torch.norm(pos[j] - pos[i]) > self.max_dist:
+            return False
+
+        i_bonded = self.bonds[i][self.bonds[i] != torch.inf]
+        if (len(i_bonded) > 0 and
+            angle(pos[i], pos[i_bonded[0].long()], pos[j]) < self.min_angle):
+            return False
+
+        j_bonded = self.bonds[j][self.bonds[j] != torch.inf]
+        if (len(j_bonded) > 0 and
+            angle(pos[j], pos[j_bonded[0].long()], pos[i]) < self.min_angle):
+            return False
+
+        return True
+
+    def check_constraints_for_mnd_bond(self, i, str_positions, mnd_position):
+        if ((self.bonds[i][:2] == torch.inf).any() or
+            torch.norm(str_positions[i] - mnd_position) > self.max_dist):
+            return False
+
+        return True
+
 class Things:
     def __init__(self, thing_types = None, state_file = None):
         # Initialize font
@@ -50,8 +122,8 @@ class Things:
             for _ in range(self.Pop)]
         )
         self.E = self.energies.sum().item() // 1000
-        self.memory = torch.zeros((self.Pop, 6), dtype = torch.float32)
-        self.str_manipulations = torch.zeros((0, 2), dtype = torch.float32)
+        self.memory = torch.zeros((self.Pop, 12), dtype = torch.float32)
+        self.str_manipulations = torch.zeros((0, 2, 3), dtype = torch.float32)
         self.Rotation = torch.rand((self.Pop,)) * 2 * math.pi
         self.U = torch.stack(
             (
@@ -60,12 +132,17 @@ class Things:
             ),
             dim = 1
         )
+        self.distances = None
+        self.bonds = torch.empty(0)
+        self.bond_sites = torch.zeros((self.Pop,), dtype = torch.float32)
+        self.universal_monad_identifier = torch.arange(self.Pop)
+        self.total_number_of_all_monads = self.Pop
 
         # Initialize genomes and lineages
         self.genomes = torch.cat(
             (
-                torch.zeros((self.Pop, 6), dtype = torch.float32),
-                initialize_parameters(self.Pop, 40, 27, "nn2")
+                torch.zeros((self.Pop, 12), dtype = torch.float32),
+                initialize_parameters(self.Pop, 52, 46, "nn23")
             ),
             dim = 1
         )
@@ -83,15 +160,14 @@ class Things:
         return self.lineages[i][0] + len(self.lineages[i])
 
     def apply_genomes(self):
-        """Monad1X275 neurogenetics"""
-        self.elemental_biases = torch.tanh(self.genomes[:, :6])
-        self.nn = nn2(self.genomes[:, 6:], 40, 27)
+        """Monad1XC814 neurogenetics"""
+        self.elemental_biases = torch.tanh(self.genomes[:, :12])
+        self.nn = nn23(self.genomes[:, 12:], 52, 46)
 
     def mutate(self, i, probability = 0.1, strength = 1.):
-        original_genome = self.genomes[i].clone()
-        mutation_mask = torch.rand_like(original_genome) < probability
-        mutations = torch.rand_like(original_genome) * 2 - 1
-        return original_genome + mutation_mask * mutations * strength
+        mutation_mask = torch.rand_like(self.genomes[i]) < probability
+        mutations = torch.rand_like(self.genomes[i]) * 2 - 1
+        return self.genomes[i] + mutation_mask * mutations * strength
 
     def sensory_inputs(self, grid):
         # For each monad, there's a vector pointing towards the center of the
@@ -104,7 +180,10 @@ class Things:
 
         # For each monad, the combined effect of energy particles in their
         # vicinity is calculated.
-        indices, self.distances, self.diffs = vicinity(self.positions)
+        if self.distances == None:
+            _, self.distances, self.diffs = vicinity(self.positions)
+        else:
+            pass
         if self.monad_mask.any() and self.energy_mask.any():
             col1  = (
                 self.diffs[self.monad_mask][:, self.energy_mask] /
@@ -113,7 +192,7 @@ class Things:
                         :, self.energy_mask
                     ] ** 2 + epsilon
                 ).unsqueeze(2)
-            ).sum(dim = 1) * 6.
+            ).sum(dim = 1) * STD_RADIUS
         else:
             col1 = torch.zeros((self.Pop, 2))
 
@@ -127,7 +206,7 @@ class Things:
                         :, self.monad_mask
                     ] ** 2 + epsilon
                 ).unsqueeze(2)
-            ).sum(dim = 1) * 10.
+            ).sum(dim = 1) * STD_RADIUS
         else:
             col2 = torch.zeros((self.Pop, 2))
 
@@ -153,7 +232,7 @@ class Things:
         if self.monad_mask.any() and self.structure_mask.any():
             dist = self.distances[self.monad_mask][:, self.structure_mask]
             self.dist_mnd_str, self.structure_indices = torch.topk(
-                dist.masked_fill(dist == 0, float('inf')),
+                dist.masked_fill(dist == 0, torch.inf),
                 k = min(6, self.structure_mask.sum()),
                 dim = 1,
                 largest = False
@@ -171,7 +250,7 @@ class Things:
                         self.structure_indices
                     ) ** 2 + epsilon
                 ).unsqueeze(2)
-            ).view(self.Pop, 12) * 8.
+            ).view(self.Pop, 12) * STD_RADIUS
         else:
             col5 = torch.zeros((self.Pop, 12), dtype = torch.float32)
 
@@ -188,7 +267,7 @@ class Things:
                 self.memory
             ),
             dim = 1
-        ).view(self.Pop, 40, 1)
+        ).view(self.Pop, 52, 1)
 
     def neural_action(self):
         return self.nn.forward(self.input_vectors)
@@ -198,9 +277,15 @@ class Things:
         if SYSTEM_HEAT == 0:
             return torch.tensor([[0, 0] for _ in range(numberOf_energyUnits)],
                                 dtype = torch.float32)
-        values = (torch.tensor(list(range(SYSTEM_HEAT)), dtype = torch.float32)
-                  - (SYSTEM_HEAT - 1) / 2)
-        weights = torch.ones(SYSTEM_HEAT, dtype = torch.float32)
+        values = (
+            torch.tensor(
+                list(
+                    range(SYSTEM_HEAT * 2 + 1)
+                ),
+                dtype = torch.float32
+            ) - SYSTEM_HEAT
+        )
+        weights = torch.ones(SYSTEM_HEAT * 2 + 1, dtype = torch.float32)
         indices = torch.multinomial(
             weights,
             numberOf_energyUnits * 2,
@@ -216,7 +301,7 @@ class Things:
         # Initialize force field
         force_field = torch.zeros_like(
             grid.grid
-        ).repeat(2, 1, 1, 1).squeeze(1)
+        ).repeat(2, 1, 1, 1)
         indices = (self.positions[self.structure_mask] // grid.cell_size).long()
 
         numerator = torch.gather(
@@ -245,22 +330,25 @@ class Things:
 
         # Calculate resource manipulations
         manipulation_contributions = (
-            neural_action[:, 12:18].unsqueeze(2) *
-            unit_vectors /
-            denominator
-        ) * 8.
+            neural_action[:, 12:30].view(-1, 6, 1, 3) *
+            (
+                unit_vectors /
+                denominator
+            ).unsqueeze(3)
+        ) * STD_RADIUS
 
         self.str_manipulations.scatter_add_(
             0,
-            expanded_indices.view(-1, 2),
-            manipulation_contributions.view(-1, 2)
+            expanded_indices.repeat(1, 1, 3).view(-1, 2, 3),
+            manipulation_contributions.view(-1, 2, 3)
         ).clamp_(-10, 10)
 
         # Calculate and apply force field with diffusion
         for i in range(2): # For vertical and horizontal axes
-            force_field[i, 1][ # Green channel
-                indices[:, 1], indices[:, 0]
-            ] += self.str_manipulations[:, i]
+            for j in range(3): # For each channel
+                force_field[i, j][
+                    indices[:, 1], indices[:, 0]
+                ] += self.str_manipulations[:, i, j]
 
         grid.diffuse(force_field)
 
@@ -272,7 +360,7 @@ class Things:
                 neural_action[:, 6:12].unsqueeze(2) *
                 perpendicular
             ) / denominator
-        ) * 8.
+        ) * STD_RADIUS
 
         # Reduce energies
         self.energies -= (
@@ -294,35 +382,11 @@ class Things:
             0,
             expanded_indices.view(-1, 2),
             movement_contributions.view(-1, 2)
-        ) * 5.
-
-    def trace(self, grid):
-        # Initialize force field
-        force_field = torch.zeros_like(
-            grid.grid
-        ).repeat(2, 1, 1, 1).squeeze(1)
-
-        # Monads to leave red traces
-        indices = (self.positions[self.monad_mask] // grid.cell_size).long()
-        for i in range(2):
-            force_field[i, 0][
-                indices[:, 1], indices[:, 0]
-            ] += torch.rand((self.Pop,), dtype = torch.float32) * 200 - 100
-
-        # Energy units to leave blue traces
-        indices = (self.positions[self.energy_mask] // grid.cell_size).long()
-        for i in range(2):
-            force_field[i, 2][
-                indices[:, 1], indices[:, 0]
-            ] += torch.rand((self.energy_mask.sum(),),
-                            dtype = torch.float32) * 200 - 100
-
-        # Apply the field
-        grid.apply_forces(force_field)
+        ) * SYSTEM_HEAT
 
     def rotation_and_movement(self, neural_action):
         self.Rotation += torch.where(
-            neural_action[:, 1] < 0,
+            neural_action[:, 1] <= 0,
             neural_action[:, 0],
             torch.tensor([0.])
         )
@@ -333,10 +397,128 @@ class Things:
             ),
             dim = 1
         )
-        return torch.clamp_(
+        movements = torch.clamp(
             neural_action[:, 1],
             min = 0
         ).unsqueeze(1) * self.U * 5.
+        self.energies -= torch.norm(movements, dim = 1)
+        return movements
+
+    def background_repulsion(self, radius = STD_RADIUS):
+        self.moving_mask = self.monad_mask | self.structure_mask
+        self.movement_tensor[self.moving_mask] -= (
+            self.diffs[self.moving_mask][:, self.moving_mask] /
+            (
+                self.distances[self.moving_mask][:, self.moving_mask] + epsilon
+            ).unsqueeze(2) *
+            (
+                radius - self.distances[self.moving_mask][:, self.moving_mask]
+            ).clamp(0, radius).unsqueeze(2)
+        ).sum(dim = 1)
+        self.movement_tensor[self.energy_mask] -= (
+            self.diffs[self.energy_mask][:, self.structure_mask] /
+            (
+                self.distances[self.energy_mask][:, self.structure_mask] +
+                epsilon
+            ).unsqueeze(2) *
+            (
+                radius -
+                self.distances[self.energy_mask][:, self.structure_mask]
+            ).clamp(0, radius).unsqueeze(2)
+        ).sum(dim = 1)
+
+    def bond_adjustment(self):
+        # Get indices
+        str_bonds = self.bonds.bonds[:, :2]
+        valid_bonds = str_bonds != torch.inf
+        bond_pairs = valid_bonds.nonzero()
+        if len(bond_pairs) == 0:
+            return
+        bonded_idx = bond_pairs[:, 0]
+        bonders_idx = str_bonds[valid_bonds].long()
+        pos = self.positions[self.structure_mask]
+
+        # Get positions
+        start_pos = pos[bonded_idx]
+        end_pos = pos[bonders_idx]
+        bond_centers = (start_pos + end_pos) / 2
+        current_lengths = torch.norm(end_pos - start_pos, dim = 1)
+        half_lengths = current_lengths / 2
+
+        # Bond repulsion
+        moving_positions = self.positions[self.moving_mask]
+        _, distances, diffs = vicinity(moving_positions, radius = 30,
+                                       target_positions = bond_centers)
+        expanded_half_lengths = half_lengths.unsqueeze(0).expand(
+            len(moving_positions), -1
+        )
+        self.movement_tensor[self.moving_mask] -= (
+            diffs / (distances + epsilon).unsqueeze(2) *
+            (
+                expanded_half_lengths - distances
+            ).clamp(torch.tensor(0.), expanded_half_lengths).unsqueeze(2)
+        ).sum(dim = 1)
+
+        # Distance adjustment
+        target_radius = 15
+        direction_vectors = (end_pos - start_pos) / \
+                            (current_lengths.unsqueeze(1) + epsilon)
+        apply_mask = (half_lengths > target_radius).unsqueeze(1)
+        full_indices = self.structure_mask.nonzero().expand(-1, 2)
+        self.movement_tensor.scatter_add_(
+            0,
+            full_indices[bonded_idx],
+            torch.where(apply_mask, direction_vectors, -direction_vectors)
+        )
+
+        # Angle adjustment
+        has_two_bonds = (valid_bonds.sum(dim = 1) == 2)
+        if has_two_bonds.any():
+            unit_str_idx = has_two_bonds.nonzero().squeeze(1)
+            unit_pos = pos[has_two_bonds]
+            vec1 = pos[str_bonds[has_two_bonds][:, 0].long()] - unit_pos
+            vec2 = pos[str_bonds[has_two_bonds][:, 1].long()] - unit_pos
+            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
+            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
+            angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
+            angles_to_adjust = angles < self.bonds.min_angle
+
+            bisectors = (vec1 + vec2)[angles_to_adjust]
+            bisectors /= torch.norm(bisectors, dim = 1, keepdim = True) + \
+                         epsilon
+            self.movement_tensor.scatter_add_(
+                0,
+                full_indices[unit_str_idx][angles_to_adjust],
+                bisectors * 5.
+            )
+
+        # Handle monad bonds
+        mnd_bonds = self.bonds.bonds[:, 2:]
+        valid_bonds = mnd_bonds != torch.inf
+        bond_pairs = valid_bonds.nonzero()
+        if len(bond_pairs) == 0:
+            return
+        bonded_idx = bond_pairs[:, 0]
+        bonders_idx = torch.where(
+            (
+                self.universal_monad_identifier.unsqueeze(1) ==
+                mnd_bonds[valid_bonds].unsqueeze(0)
+            )
+        )[1].long()
+        start_pos = pos[bonded_idx]
+        end_pos = self.positions[self.monad_mask][bonders_idx]
+        bond_centers = (start_pos + end_pos) / 2
+        current_lengths = torch.norm(end_pos - start_pos, dim = 1)
+        half_lengths = current_lengths / 2
+        adjustment_vectors = (end_pos - start_pos) / \
+                             (current_lengths.unsqueeze(1) + epsilon) * 5.
+        apply_mask = (half_lengths > target_radius).unsqueeze(1)
+        full_indices = self.monad_mask.nonzero().expand(-1, 2)
+        self.movement_tensor.scatter_add_(
+            0,
+            full_indices[bonders_idx],
+            torch.where(apply_mask, -adjustment_vectors, adjustment_vectors)
+        )
 
     def final_action(self, grid):
         # Update sensory inputs
@@ -349,13 +531,14 @@ class Things:
                 dtype = torch.float32
             )
 
-        # Monad movements & internal state
+        # Monad movements & memory
         if self.monad_mask.any():
             neural_action = self.neural_action()
             self.movement_tensor[self.monad_mask] = self.rotation_and_movement(
                 neural_action[:, :2]
             )
-            self.memory = neural_action[:, 21:27]
+            self.memory = neural_action[:, 33:45]
+            self.bond_sites = neural_action[:, 45]
 
         # Fetch energyUnit movements
         if self.energy_mask.any():
@@ -366,126 +549,69 @@ class Things:
             if self.Pop > 0:
                 self.movement_tensor[self.structure_mask] = self.re_action(
                     grid,
-                    neural_action[:, 3:21]
-                )
+                    neural_action[:, 3:33]
+                ).clamp_(-SYSTEM_HEAT, SYSTEM_HEAT)
             else:
                 self.movement_tensor[self.structure_mask] = torch.zeros(
                     (self.structure_mask.sum(), 2),
                     dtype = torch.float32
                 )
 
-        # Monads and energy units to leave trace
-        self.trace(grid)
-
         # Self-induced divison
         if self.monad_mask.any():
-            for i in (neural_action[:, 2] > torch.rand(self.Pop)).nonzero():
+            fission = neural_action[:, 2] > torch.rand(self.Pop)
+            for i in fission.nonzero():
                 self.monad_division(i.item())
+            if fission.any():
+                _, self.distances, self.diffs = vicinity(self.positions)
 
-        # Apply movements
+        # Calculate final forces and apply movements
+        self.background_repulsion()
+        self.bond_adjustment()
         self.update_positions()
 
         # Update total monad energy
         self.E = self.energies.sum().item() // 1000
 
     def update_positions(self):
-        provisional_positions = self.positions + self.movement_tensor
-
-        # Apply rigid boundaries
-        provisional_positions = torch.stack(
+        # Apply movement tensor
+        self.positions = self.positions + self.movement_tensor
+        self.positions = torch.stack(
             [
                 torch.clamp(
-                    provisional_positions[:, 0],
+                    self.positions[:, 0],
                     min = self.sizes,
                     max = SIMUL_WIDTH - self.sizes
                 ),
                 torch.clamp(
-                    provisional_positions[:, 1],
+                    self.positions[:, 1],
                     min = self.sizes,
                     max = SIMUL_HEIGHT - self.sizes
                 )
             ],
             dim = 1
         )
-
-        # Get neighboring things
-        indices, distances, diffs = vicinity(provisional_positions)
-
-        # Monad-monad collisions
-        dist = distances[self.monad_mask][:, self.monad_mask]
-        collision_mask = (
-            (0. < dist) & (dist < THING_TYPES["monad"]["size"] * 2)
-        ).any(dim = 1)
-
-        # StructureUnit-anything collisions
-        size_sums = (
-            self.sizes + THING_TYPES["structuralUnit"]["size"]
-        ).unsqueeze(1)
-
-        dist = distances[:, self.structure_mask]
-        collision_mask_str = (
-            (0. < dist) &
-            (dist < size_sums)
-        ).any(dim = 1)
-
-        dist = distances[self.structure_mask]
-        collision_mask_str[self.structure_mask] = (
-            (0. < dist) &
-            (dist < size_sums[self.structure_mask])
-        ).any(dim = 1)
-
-        # Check energy levels
-        movement_magnitudes = torch.norm(
-            self.movement_tensor[self.monad_mask],
-            dim = 1
-        )
-        enough_energy = self.energies >= movement_magnitudes
-
-        # Construct final apply mask
-        final_apply_mask = ~collision_mask_str
-        final_apply_mask[self.monad_mask] = (
-            ~collision_mask_str[self.monad_mask] &
-            ~collision_mask &
-            enough_energy
-        )
-
-        # Apply the movements
-        self.positions = torch.where(
-            final_apply_mask.unsqueeze(1),
-            provisional_positions,
-            self.positions
-        )
-
-        # Reduce energies from monads
-        actual_magnitudes = torch.where(
-            final_apply_mask[self.monad_mask],
-            movement_magnitudes,
-            torch.tensor([0.])
-        )
-        self.energies -= actual_magnitudes
+        _, self.distances, self.diffs = vicinity(self.positions)
 
         # EnergyUnit-monad collisions
-        energy_monad_dist = distances[self.energy_mask][:, self.monad_mask]
+        energy_monad_dist = self.distances[self.energy_mask][:, self.monad_mask]
         energy_collision_mask = (
             (0. < energy_monad_dist) &
-            (energy_monad_dist < (THING_TYPES["monad"]["size"] +
-                                 THING_TYPES["energyUnit"]["size"]))
+            (energy_monad_dist < (THING_TYPES["monad"]["size"]))
         )
 
         if energy_collision_mask.any():
             energy_idx, monad_idx = energy_collision_mask.nonzero(
                 as_tuple = True
             )
-            energy_per_monad = (
-                UNIT_ENERGY / energy_collision_mask[energy_idx].sum(dim = 1)
-            )
             self.energies.scatter_add_(
                 0,
                 monad_idx,
-                energy_per_monad
+                torch.tensor(UNIT_ENERGY).expand_as(monad_idx)
             )
             energy_idx_general = torch.where(self.energy_mask)[0][energy_idx]
             self.remove_energyUnits(unique(energy_idx_general.tolist()))
+            _, self.distances, self.diffs = vicinity(self.positions)
 
     def monad_division(self, i):
         # Set out main attributes and see if division is possible
@@ -541,7 +667,7 @@ class Things:
         self.memory = torch.cat(
             (
                 self.memory,
-                torch.zeros((1, 6), dtype = torch.float32)
+                torch.zeros((1, 12), dtype = torch.float32)
             ),
             dim = 0
         )
@@ -563,6 +689,20 @@ class Things:
                     ),
                     dim = 1
                 )
+            ),
+            dim = 0
+        )
+        self.bond_sites = torch.cat(
+            (
+                self.bond_sites,
+                torch.tensor([0.])
+            ),
+            dim = 0
+        )
+        self.universal_monad_identifier = torch.cat(
+            (
+                self.universal_monad_identifier,
+                torch.tensor([self.total_number_of_all_monads])
             ),
             dim = 0
         )
@@ -603,6 +743,7 @@ class Things:
         )
         self.N += 1
         self.Pop += 1
+        self.total_number_of_all_monads += 1
 
         # Mutate the old genome & apply the new genome
         idx = self.from_general_to_monad_idx(i)
@@ -638,7 +779,19 @@ class Things:
             self.memory = remove_element(self.memory, i)
             self.Rotation = remove_element(self.Rotation, i)
             self.U = remove_element(self.U, i)
+            self.bond_sites = remove_element(self.bond_sites, i)
             del self.lineages[i]
+
+            # Update bonds
+            universalID = self.universal_monad_identifier[i]
+            self.universal_monad_identifier = remove_element(
+                self.universal_monad_identifier, i
+            )
+            self.bonds.bonds[:, 2:] = torch.where(
+                self.bonds.bonds[:, 2:] == universalID,
+                torch.inf,
+                self.bonds.bonds[:, 2:]
+            )
 
             # Get general index to remove universal attributes
             idx = self.from_monad_to_general_idx(i)
@@ -726,7 +879,7 @@ class Things:
 
         N = len(positions_to_add)
         if N == 0:
-            return
+            return 0
         self.N += N
 
         for _ in range(N):
@@ -777,6 +930,8 @@ class Things:
             dim = 0
         )
 
+        return 1
+
     def remove_energyUnits(self, indices):
         for i in indices[::-1]:
             del self.thing_types[i]
@@ -794,6 +949,57 @@ class Things:
         self.memory_mask = self.memory_mask[mask]
 
     def draw(self, screen, show_info = True, show_sight = False):
+        # Draw bonds
+        if self.structure_mask.any():
+            struct_positions = self.positions[self.structure_mask]
+            struct_indices = torch.where(self.structure_mask)[0]
+
+            if hasattr(self.bonds, 'bonds'):
+                for i in range(len(self.bonds.bonds)):
+                    for j, bonded_idx in enumerate(self.bonds.bonds[i, :2]):
+                        if bonded_idx == torch.inf:
+                            continue
+                        if i < bonded_idx:
+                            start_pos = struct_positions[i]
+                            end_pos = struct_positions[bonded_idx.long()]
+                            pygame.draw.line(
+                                screen,
+                                colors["GB"],
+                                (
+                                    int(start_pos[0].item()),
+                                    int(start_pos[1].item())
+                                ),
+                                (
+                                    int(end_pos[0].item()),
+                                    int(end_pos[1].item())
+                                ),
+                                1
+                            )
+
+                    for j, bonded_idx in enumerate(self.bonds.bonds[i, 2:]):
+                        if bonded_idx == torch.inf:
+                            continue
+                        start_pos = struct_positions[i]
+                        end_pos = self.positions[self.monad_mask][
+                            torch.where(
+                                self.universal_monad_identifier ==
+                                bonded_idx
+                            )[0][0].long()
+                        ]
+                        pygame.draw.line(
+                            screen,
+                            colors["B"],
+                            (
+                                int(start_pos[0].item()),
+                                int(start_pos[1].item())
+                            ),
+                            (
+                                int(end_pos[0].item()),
+                                int(end_pos[1].item())
+                            ),
+                            1
+                        )
+
         for i, pos in enumerate(self.positions):
             thing_type = self.thing_types[i]
             thing_color = self.colors[i]
@@ -828,6 +1034,17 @@ class Things:
                 )
                 screen.blit(energy_text, energy_rect)
 
+                # Show universal ID
+                UID_text = self.universal_monad_identifier[idx].item()
+                UID_text = self.font.render(UID_text, True, colors["RGB"])
+                UID_rect = UID_text.get_rect(
+                    center = (
+                        int(pos[0].item()),
+                        int(pos[1].item() + 2 * size)
+                    )
+                )
+                screen.blit(UID_text, UID_rect)
+
             if show_sight and thing_type == "monad":
                 draw_dashed_circle(screen, self.colors[i], (int(pos[0].item()),
                                    int(pos[1].item())), SIGHT)
@@ -842,7 +1059,11 @@ class Things:
             'lineages': self.lineages,
             'colors': self.colors,
             'memory': self.memory.tolist(),
-            'Rotation': self.Rotation.tolist()
+            'Rotation': self.Rotation.tolist(),
+            'bonds': self.bonds.bonds.tolist(),
+            'bond_sites': self.bond_sites.tolist(),
+            'universalID': self.universal_monad_identifier.tolist(),
+            'universalN': self.total_number_of_all_monads
         }
 
     def load_state(self, state_file):
@@ -869,6 +1090,8 @@ class Things:
             ),
             dim = 1
         )
+        self.universal_monad_identifier = torch.tensor(state['universalID'])
+        self.total_number_of_all_monads = state['universalN']
 
         self.monad_mask = torch.tensor(
             [thing_type == "monad" for thing_type in self.thing_types]
@@ -889,6 +1112,11 @@ class Things:
 
         pygame.font.init()
         self.font = pygame.font.SysFont(None, 12)
+
+        self.distances = None
+        self.initialize_bonds()
+        self.bonds.bonds = torch.tensor(state['bonds'])
+        self.bond_sites = torch.tensor(state['bond_sites'])
 
     def add_structuralUnits(self, POP_STR = 1):
         self.thing_types += ["structuralUnit" for _ in range(POP_STR)]
@@ -937,7 +1165,17 @@ class Things:
         self.str_manipulations = torch.cat(
             (
                 self.str_manipulations,
-                torch.rand((POP_STR, 2), dtype = torch.float32) * 20 - 10
+                torch.cat(
+                    (
+                        torch.zeros((POP_STR, 2, 1), dtype = torch.float32),
+                        torch.rand(
+                            (POP_STR, 2, 1),
+                            dtype = torch.float32
+                        ) * 20 - 10,
+                        torch.zeros((POP_STR, 2, 1), dtype = torch.float32)
+                    ),
+                    dim = 2
+                )
             ),
             dim = 0
         )
@@ -986,3 +1224,6 @@ class Things:
             ),
             dim = 0
         )
+
+    def initialize_bonds(self):
+        self.bonds = Bonds(self.structure_mask.sum().item())

@@ -2,7 +2,7 @@ from simulation import Simulation
 from things import Things
 import argparse
 
-POP_0 = 50
+POP_0 = 40
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
