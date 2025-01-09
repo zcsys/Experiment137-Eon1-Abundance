@@ -142,15 +142,8 @@ def Rules(simul, n):
                         dist = torch.norm(str_positions[str_idx] -
                                           mnd_positions[mnd_idx])
 
-                        # Break if:
-                        # 1. Distance too large
-                        # 2. Bond site inactive
-                        # 3. Random break probability
-                        should_break = (
-                            dist > 50 and
-                            torch.rand(1) < 0.02 * (dist - 50) and
-                            simul.things.bond_sites[mnd_idx] < 0
-                        )
-
-                        if should_break:
+                        if (dist > 50 and
+                            torch.rand(1) < 0.02 * (dist - 50) or
+                            dist < 30 and
+                            simul.things.bond_sites[mnd_idx] < 0):
                             simul.things.bonds.break_mnd_bond(str_idx, 0)
