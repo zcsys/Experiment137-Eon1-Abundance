@@ -479,8 +479,8 @@ class Things:
             unit_pos = pos[has_two_bonds]
             vec1 = pos[str_bonds[has_two_bonds][:, 0].long()] - unit_pos
             vec2 = pos[str_bonds[has_two_bonds][:, 1].long()] - unit_pos
-            vec1 /= torch.norm(vec1, dim = 1, keepdim = True)
-            vec2 /= torch.norm(vec2, dim = 1, keepdim = True)
+            vec1 /= torch.norm(vec1, dim = 1, keepdim = True) + epsilon
+            vec2 /= torch.norm(vec2, dim = 1, keepdim = True) + epsilon
             angles = torch.acos(torch.sum(vec1 * vec2, dim = 1))
             angles_to_adjust = angles < self.bonds.min_angle
 
@@ -509,17 +509,20 @@ class Things:
         )[1].long()
         start_pos = pos[bonded_idx]
         end_pos = self.positions[self.monad_mask][bonders_idx]
-        bond_centers = (start_pos + end_pos) / 2
-        current_lengths = torch.norm(end_pos - start_pos, dim = 1)
-        half_lengths = current_lengths / 2
-        adjustment_vectors = (end_pos - start_pos) / \
-                             (current_lengths.unsqueeze(1) + epsilon)
-        apply_coeff = (target_radius - half_lengths).unsqueeze(1)
+        vec1 = pos[str_bonds[bonded_idx][:, 0].long()] - start_pos
+        vec2 = pos[str_bonds[bonded_idx][:, 1].long()] - start_pos
+        direction_vectors = vec1 + vec2
+        direction_vectors /= torch.norm(direction_vectors, dim = 1,
+                                        keepdim = True) + epsilon
+        adjustment_vectors = torch.min(
+            start_pos - end_pos + 2 * target_radius * direction_vectors,
+            start_pos - end_pos - 2 * target_radius * direction_vectors
+        ) * 0.5
         full_indices = self.monad_mask.nonzero().expand(-1, 2)
         self.movement_tensor.scatter_add_(
             0,
             full_indices[bonders_idx],
-            apply_coeff * adjustment_vectors
+            adjustment_vectors
         )
 
     def final_action(self, grid):
@@ -990,7 +993,7 @@ class Things:
                         ]
                         pygame.draw.line(
                             screen,
-                            colors["B"],
+                            colors["GB"],
                             (
                                 int(start_pos[0].item()),
                                 int(start_pos[1].item())
