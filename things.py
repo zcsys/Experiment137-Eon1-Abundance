@@ -42,7 +42,7 @@ class Bonds:
             return
         slot = self.get_first_available_slot_mnd(i)
         if (slot is not None and
-            self.check_constraints_for_mnd_bond(i, str_positions,
+            self.check_constraints_for_mnd_bond(i, j, str_positions,
                                                 mnd_position)):
             self.bonds[i][slot + 2] = j
 
@@ -74,8 +74,9 @@ class Bonds:
 
         return True
 
-    def check_constraints_for_mnd_bond(self, i, str_positions, mnd_position):
+    def check_constraints_for_mnd_bond(self, i, j, str_positions, mnd_position):
         if ((self.bonds[i][:2] == torch.inf).any() or
+            (self.bonds[:, 2:] == j).any() or
             torch.norm(str_positions[i] - mnd_position) > self.max_dist):
             return False
 
