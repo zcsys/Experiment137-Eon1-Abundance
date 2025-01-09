@@ -499,10 +499,11 @@ class Things:
         if len(bond_pairs) == 0:
             return
         bonded_idx = bond_pairs[:, 0]
+        bonders_idx = mnd_bonds[valid_bonds].long()
         bonders_idx = torch.where(
             (
-                self.universal_monad_identifier.unsqueeze(1) ==
-                mnd_bonds[valid_bonds].unsqueeze(0)
+                self.universal_monad_identifier.unsqueeze(0) ==
+                mnd_bonds[valid_bonds].unsqueeze(1)
             )
         )[1].long()
         start_pos = pos[bonded_idx]
@@ -511,13 +512,13 @@ class Things:
         current_lengths = torch.norm(end_pos - start_pos, dim = 1)
         half_lengths = current_lengths / 2
         adjustment_vectors = (end_pos - start_pos) / \
-                             (current_lengths.unsqueeze(1) + epsilon) * 5.
-        apply_mask = (half_lengths > target_radius).unsqueeze(1)
+                             (current_lengths.unsqueeze(1) + epsilon)
+        apply_coeff = (target_radius - half_lengths).unsqueeze(1)
         full_indices = self.monad_mask.nonzero().expand(-1, 2)
         self.movement_tensor.scatter_add_(
             0,
             full_indices[bonders_idx],
-            torch.where(apply_mask, -adjustment_vectors, adjustment_vectors)
+            apply_coeff * adjustment_vectors
         )
 
     def final_action(self, grid):
