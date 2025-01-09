@@ -88,8 +88,8 @@ def Rules(simul, n):
                     dist = str_distances[i, bonded_idx]
 
                     # Breaking probability increases as distance approaches max
-                    if dist > 40:
-                        break_prob = 0.001 * (dist - 40)
+                    if dist > 50:
+                        break_prob = 0.02 * (dist - 50)
                         if break_prob_matrix[i, j] < break_prob:
                             simul.things.bonds.break_str_bond(i, bonded_idx)
 
@@ -147,10 +147,9 @@ def Rules(simul, n):
                         # 2. Bond site inactive
                         # 3. Random break probability
                         should_break = (
-                            dist > 50 or
-                            simul.things.bond_sites[mnd_idx] <= 0 or
-                            (dist > 40 and
-                             torch.rand(1) < 0.001 * (dist - 40))
+                            dist > 50 and
+                            torch.rand(1) < 0.02 * (dist - 50) and
+                            simul.things.bond_sites[mnd_idx] < 0
                         )
 
                         if should_break:

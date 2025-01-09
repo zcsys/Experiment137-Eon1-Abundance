@@ -460,7 +460,7 @@ class Things:
         ).sum(dim = 1)
 
         # Distance adjustment
-        target_radius = 20
+        target_radius = 15
         direction_vectors = (end_pos - start_pos) / \
                             (current_lengths.unsqueeze(1) + epsilon)
         apply_mask = (half_lengths > target_radius).unsqueeze(1)
@@ -468,7 +468,7 @@ class Things:
         self.movement_tensor.scatter_add_(
             0,
             full_indices[bonded_idx],
-            direction_vectors * apply_mask
+            torch.where(apply_mask, direction_vectors, -direction_vectors)
         )
 
         # Angle adjustment
@@ -510,14 +510,14 @@ class Things:
         bond_centers = (start_pos + end_pos) / 2
         current_lengths = torch.norm(end_pos - start_pos, dim = 1)
         half_lengths = current_lengths / 2
-        direction_vectors = (end_pos - start_pos) / \
-                            (current_lengths.unsqueeze(1) + epsilon)
+        adjustment_vectors = (end_pos - start_pos) / \
+                             (current_lengths.unsqueeze(1) + epsilon) * 5.
         apply_mask = (half_lengths > target_radius).unsqueeze(1)
         full_indices = self.monad_mask.nonzero().expand(-1, 2)
         self.movement_tensor.scatter_add_(
             0,
             full_indices[bonders_idx],
-            torch.where(apply_mask, direction_vectors, -direction_vectors)
+            torch.where(apply_mask, -adjustment_vectors, adjustment_vectors)
         )
 
     def final_action(self, grid):
@@ -1033,6 +1033,17 @@ class Things:
                     )
                 )
                 screen.blit(energy_text, energy_rect)
+
+                # Show universal ID
+                UID_text = self.universal_monad_identifier[idx].item()
+                UID_text = self.font.render(UID_text, True, colors["RGB"])
+                UID_rect = UID_text.get_rect(
+                    center = (
+                        int(pos[0].item()),
+                        int(pos[1].item() + 2 * size)
+                    )
+                )
+                screen.blit(UID_text, UID_rect)
 
             if show_sight and thing_type == "monad":
                 draw_dashed_circle(screen, self.colors[i], (int(pos[0].item()),
